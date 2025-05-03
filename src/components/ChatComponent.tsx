@@ -53,9 +53,14 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [enableStreaming, setEnableStreaming] = useState<boolean>(true);
   const [abortController, setAbortController] = useState<AbortController | null>(null);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
+  const [isAddingMessage, setIsAddingMessage] = useState<boolean>(false); // Add a state to track when we're adding a new message
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  // Add a ref to track scroll position
+  const scrollPositionRef = useRef<number>(0);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
 
   // Add this useEffect to handle auth state changes
   useEffect(() => {
@@ -135,6 +140,10 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     }
 
     try {
+      // Store current scroll position before deletion
+      const currentScrollTop = chatContainerRef.current?.scrollTop || 0;
+      scrollPositionRef.current = currentScrollTop;
+      
       // Delete the message from the database
       const success = await deleteMessage(messageId);
       
@@ -143,6 +152,13 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
         setMessages((prevMessages) => 
           prevMessages.filter(message => message.messageid !== messageId)
         );
+        
+        // Set a timeout to restore scroll position after the state update and re-render
+        setTimeout(() => {
+          if (chatContainerRef.current) {
+            chatContainerRef.current.scrollTop = scrollPositionRef.current;
+          }
+        }, 0);
       } else {
         console.error('Failed to delete message');
       }
@@ -151,9 +167,18 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     }
   };
 
-  // Scroll to bottom of chat when messages change
+  // Scroll to bottom of chat only when new messages are added, not during deletion
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // We'll use our direct scroll position management for deletions
+    if (!chatContainerRef.current) return;
+    
+    // Scroll to bottom for new messages, but not when deleting
+    const messageContainer = chatContainerRef.current;
+    const shouldScrollToBottom = messageContainer.scrollHeight - messageContainer.scrollTop <= messageContainer.clientHeight * 1.2;
+    
+    if (shouldScrollToBottom) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages]);
 
   // Auto-resize textarea as content grows
@@ -543,7 +568,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
           <h1 className="font-bold text-xl">Orchestrate</h1>
         </div>
 
-        <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent">
+        <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent" ref={chatContainerRef}>
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center px-4">
               <h1 className="text-2xl md:text-3xl font-semibold mb-8 text-center">How can I help you?</h1>
