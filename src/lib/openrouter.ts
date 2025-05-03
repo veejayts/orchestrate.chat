@@ -16,8 +16,8 @@ export interface OpenRouterModel {
   id: string;
   name: string;
   description?: string;
-  context_length: number;
-  pricing: {
+  context_length?: number;
+  pricing?: {
     prompt: number;
     completion: number;
   };
@@ -27,28 +27,27 @@ export interface OpenRouterModel {
 }
 
 export async function getAvailableModels(): Promise<OpenRouterModel[]> {
-  const apiKey = process.env.NEXT_PUBLIC_OPENROUTER_API_KEY;
+  // Import the supabase client
+  const { supabase } = await import('./supabase');
   
-  if (!apiKey) {
-    throw new Error('OpenRouter API key is not set');
+  try {
+    const { data, error } = await supabase
+      .from('avail_models')
+      .select('model_id, model_name');
+
+    if (error) {
+      throw new Error(`Supabase error: ${error.message}`);
+    }
+    
+    // Map the data from Supabase to the OpenRouterModel format
+    return data.map(model => ({
+      id: model.model_id,
+      name: model.model_name,
+    }));
+  } catch (error) {
+    console.error('Error fetching available models:', error);
+    return [];
   }
-
-  const response = await fetch('https://openrouter.ai/api/v1/models', {
-    method: 'GET',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'HTTP-Referer': process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000',
-      'X-Title': 'Orchestrate Chat'
-    },
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`OpenRouter API error: ${error}`);
-  }
-
-  const data = await response.json();
-  return data.data;
 }
 
 export async function getChatCompletion(
