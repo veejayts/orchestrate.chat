@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ChatMessage, getChatCompletion, getAvailableModels, OpenRouterModel } from '@/lib/openrouter';
-import { createChat, saveMessage, getChatMessages, getUserChats, dbMessagesToChatMessages, Chat, updateChatTitle } from '@/lib/supabase';
+import { createChat, saveMessage, getChatMessages, getUserChats, dbMessagesToChatMessages, Chat, updateChatTitle, supabase } from '@/lib/supabase';
 import Sidebar from './Sidebar';
 
 // Sample suggestion questions
@@ -32,6 +32,26 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Add this useEffect to handle auth state changes
+  useEffect(() => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') {
+        // Clear chat state on sign out
+        setMessages([]);
+        setActiveChatId(null);
+        setUserChats([]);
+        setInput('');
+        // Note: The parent component (likely page.tsx or layout.tsx)
+        // should handle redirecting the user after sign out.
+      }
+    });
+
+    // Cleanup listener on component unmount
+    return () => {
+      authListener?.subscription.unsubscribe();
+    };
+  }, []); // Empty dependency array ensures this runs only once on mount
 
   // Close dropdown when clicking outside
   useEffect(() => {
