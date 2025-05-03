@@ -1,7 +1,25 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { ChatMessage, getChatCompletion, getAvailableModels, OpenRouterModel } from '@/lib/openrouter';
-import { createChat, saveMessage, getChatMessages, getUserChats, dbMessagesToChatMessages, Chat, updateChatTitle, supabase } from '@/lib/supabase';
+import { 
+  ChatMessage, 
+  getChatCompletion, 
+  getAvailableModels, 
+  OpenRouterModel, 
+  getChatCompletionStream, 
+  ChatCompletionChunk 
+} from '@/lib/openrouter';
+import { 
+  createChat, 
+  saveMessage, 
+  getChatMessages, 
+  getUserChats, 
+  dbMessagesToChatMessages, 
+  Chat, 
+  updateChatTitle, 
+  supabase,
+  saveStreamingMessage,
+  updateStreamingMessage
+} from '@/lib/supabase';
 import Sidebar from './Sidebar';
 
 // Sample suggestion questions
@@ -29,6 +47,8 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState<boolean>(false);
   const [modelSearchQuery, setModelSearchQuery] = useState<string>('');
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
+  const [enableStreaming, setEnableStreaming] = useState<boolean>(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -125,7 +145,157 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     setMessages(dbMessagesToChatMessages(chatMessages));
   };
 
+  // Handle streaming submission
+  const handleStreamingSubmit = async (e: React.FormEvent | null, submittedText: string = input) => {
+    if (e) e.preventDefault();
+    
+    const messageText = submittedText.trim();
+    if (!messageText || isLoading) return;
+
+    // Create a new chat if one doesn't exist
+    let currentChatId = activeChatId;
+    let isNewChat = false;
+    if (!currentChatId) {
+      const chatId = await createChat();
+      if (!chatId) {
+        console.error('Failed to create a new chat');
+        return;
+      }
+      currentChatId = chatId;
+      setActiveChatId(chatId);
+      isNewChat = true;
+      // Add the new chat to the user's chats
+      loadUserChats();
+    }
+
+    // Add user message to chat
+    const userMessage: ChatMessage = { role: 'user', content: messageText };
+    setMessages((prev) => [...prev, userMessage]);
+    setInput('');
+    setIsLoading(true);
+
+    // Save user message to database
+    await saveMessage(currentChatId, messageText, 'user');
+
+    // Update chat title if this is the first message in a new chat
+    if (isNewChat || messages.length === 0) {
+      // Get first 25 characters for title
+      const chatTitle = messageText.length > 25 
+        ? messageText.substring(0, 25) + '...' 
+        : messageText;
+      
+      await updateChatTitle(currentChatId, chatTitle);
+      loadUserChats(); // Refresh chat list to show new title
+    }
+
+    try {
+      // Format conversation history
+      const conversationHistory = [...messages, userMessage];
+      
+      // Create initial message in UI
+      const initialAssistantMessage: ChatMessage = { 
+        role: 'assistant', 
+        content: '', 
+        model: selectedModel 
+      };
+      setMessages((prev) => [...prev, initialAssistantMessage]);
+      
+      // Create initial message in database
+      const messageId = await saveStreamingMessage(currentChatId, '', selectedModel);
+      setStreamingMessageId(messageId);
+      
+      // Accumulated content for database updates
+      let accumulatedContent = '';
+      
+      // Handle streaming chunks
+      await getChatCompletionStream(
+        conversationHistory,
+        selectedModel,
+        (chunk) => {
+          // Update the message content as chunks arrive
+          setMessages((prevMessages) => {
+            const newMessages = [...prevMessages];
+            const lastMessageIndex = newMessages.length - 1;
+            
+            if (lastMessageIndex >= 0 && newMessages[lastMessageIndex].role === 'assistant') {
+              const contentDelta = chunk.choices[0].delta.content || '';
+              accumulatedContent += contentDelta;
+              
+              newMessages[lastMessageIndex] = {
+                ...newMessages[lastMessageIndex],
+                content: accumulatedContent,
+                model: chunk.model
+              };
+            }
+            
+            return newMessages;
+          });
+          
+          // Periodically update the message in the database
+          // Only update every ~50 characters to reduce database writes
+          if (accumulatedContent.length % 50 === 0 && messageId) {
+            updateStreamingMessage(messageId, accumulatedContent).catch(console.error);
+          }
+        },
+        () => {
+          // When streaming is complete, save the final message to the database
+          if (messageId && accumulatedContent) {
+            updateStreamingMessage(messageId, accumulatedContent).catch(console.error);
+          }
+          setIsLoading(false);
+          setStreamingMessageId(null);
+        },
+        (error) => {
+          console.error('Error during streaming:', error);
+          // Handle error in UI
+          setMessages((prevMessages) => {
+            const newMessages = [...prevMessages];
+            const lastMessageIndex = newMessages.length - 1;
+            
+            if (lastMessageIndex >= 0 && newMessages[lastMessageIndex].role === 'assistant') {
+              if (accumulatedContent) {
+                // Keep what we have so far and add error message
+                newMessages[lastMessageIndex].content = 
+                  accumulatedContent + '\n\n_Error: Message streaming was interrupted._';
+              } else {
+                // Replace empty message with error
+                newMessages[lastMessageIndex].content = 'Sorry, there was an error processing your request.';
+              }
+            }
+            
+            return newMessages;
+          });
+          
+          // Save error state to database
+          if (messageId) {
+            const errorMessage = accumulatedContent 
+              ? accumulatedContent + '\n\n_Error: Message streaming was interrupted._'
+              : 'Sorry, there was an error processing your request.';
+            updateStreamingMessage(messageId, errorMessage).catch(console.error);
+          }
+          
+          setIsLoading(false);
+          setStreamingMessageId(null);
+        }
+      );
+    } catch (error) {
+      console.error('Error setting up streaming:', error);
+      const errorMessage = { role: 'assistant' as const, content: 'Sorry, there was an error processing your request.' };
+      setMessages((prev) => [...prev, errorMessage]);
+      
+      // Save error message to database
+      await saveMessage(currentChatId, errorMessage.content, 'system');
+      setIsLoading(false);
+    }
+  };
+
+  // Modified handleSubmit to use streaming if enabled
   const handleSubmit = async (e: React.FormEvent | null, submittedText: string = input) => {
+    if (enableStreaming) {
+      return handleStreamingSubmit(e, submittedText);
+    }
+    
+    // Original non-streaming implementation
     if (e) e.preventDefault();
     
     const messageText = submittedText.trim();
@@ -379,61 +549,79 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
             </form>
             <div className="flex mt-2 justify-between items-center text-xs text-zinc-500">
               <div className="hidden sm:block">Press Enter to send</div>
-              <div className="relative flex justify-end w-full sm:w-auto" ref={dropdownRef}>
-                <button 
-                  onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
-                  className="hover:text-white cursor-pointer transition-colors ml-auto"
-                  aria-label="Select model"
-                >
-                  {selectedModel.split('/').pop() || 'AI Model'} ▼
-                </button>
-                {isModelDropdownOpen && (
-                  <div className="fixed sm:absolute bottom-16 sm:bottom-full right-3 sm:right-0 left-auto z-20 w-[calc(100%-24px)] sm:w-64 md:w-72 mb-0 sm:mb-2 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg overflow-hidden">
-                    <div className="p-2">
-                      <input
-                        type="text"
-                        value={modelSearchQuery}
-                        onChange={(e) => setModelSearchQuery(e.target.value)}
-                        placeholder="Search models"
-                        className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-md focus:outline-none focus:ring-1 focus:ring-purple-500"
-                      />
-                    </div>
-                    <div className="max-h-60 md:max-h-80 overflow-y-auto">
-                      {availableModels
-                        .filter((model) => 
-                          model.name.toLowerCase().includes(modelSearchQuery.toLowerCase()) ||
-                          model.id.toLowerCase().includes(modelSearchQuery.toLowerCase())
-                        )
-                        .map((model) => (
-                          <div
-                            key={model.id}
-                            className={`px-3 py-2 text-sm hover:bg-zinc-700 cursor-pointer flex items-center ${
-                              selectedModel === model.id ? 'bg-purple-900/40 font-medium' : ''
-                            }`}
-                            onClick={() => {
-                              setSelectedModel(model.id);
-                              setIsModelDropdownOpen(false);
-                            }}
-                          >
-                            <div className="mr-2">
-                              <div className="w-6 h-6 rounded-full flex items-center justify-center" 
-                                style={{
-                                  backgroundColor: getModelColor(model.id)
-                                }}
-                              >
-                                {model.id.split('/')[0]?.charAt(0)?.toUpperCase() || '?'}
-                              </div>
-                            </div>
-                            <div>
-                              <div className="font-medium text-white">
-                                {model.name || formatModelName(model.id)}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                    </div>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center">
+                  <label htmlFor="streamToggle" className="mr-2 cursor-pointer">
+                    {enableStreaming ? 'Streaming: On' : 'Streaming: Off'} 
+                  </label>
+                  <div className="relative inline-block w-10 align-middle select-none">
+                    <input
+                      id="streamToggle"
+                      type="checkbox"
+                      checked={enableStreaming}
+                      onChange={() => setEnableStreaming(!enableStreaming)}
+                      className="sr-only"
+                    />
+                    <div className={`block w-10 h-6 rounded-full ${enableStreaming ? 'bg-purple-600' : 'bg-zinc-700'} transition-colors duration-200`}></div>
+                    <div className={`absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform duration-200 ease-in-out ${enableStreaming ? 'transform translate-x-4' : ''}`}></div>
                   </div>
-                )}
+                </div>
+                <div className="relative flex justify-end" ref={dropdownRef}>
+                  <button 
+                    onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
+                    className="hover:text-white cursor-pointer transition-colors"
+                    aria-label="Select model"
+                  >
+                    {selectedModel.split('/').pop() || 'AI Model'} ▼
+                  </button>
+                  {isModelDropdownOpen && (
+                    <div className="fixed sm:absolute bottom-16 sm:bottom-full right-3 sm:right-0 left-auto z-20 w-[calc(100%-24px)] sm:w-64 md:w-72 mb-0 sm:mb-2 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg overflow-hidden">
+                      <div className="p-2">
+                        <input
+                          type="text"
+                          value={modelSearchQuery}
+                          onChange={(e) => setModelSearchQuery(e.target.value)}
+                          placeholder="Search models"
+                          className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-md focus:outline-none focus:ring-1 focus:ring-purple-500"
+                        />
+                      </div>
+                      <div className="max-h-60 md:max-h-80 overflow-y-auto">
+                        {availableModels
+                          .filter((model) => 
+                            model.name.toLowerCase().includes(modelSearchQuery.toLowerCase()) ||
+                            model.id.toLowerCase().includes(modelSearchQuery.toLowerCase())
+                          )
+                          .map((model) => (
+                            <div
+                              key={model.id}
+                              className={`px-3 py-2 text-sm hover:bg-zinc-700 cursor-pointer flex items-center ${
+                                selectedModel === model.id ? 'bg-purple-900/40 font-medium' : ''
+                              }`}
+                              onClick={() => {
+                                setSelectedModel(model.id);
+                                setIsModelDropdownOpen(false);
+                              }}
+                            >
+                              <div className="mr-2">
+                                <div className="w-6 h-6 rounded-full flex items-center justify-center" 
+                                  style={{
+                                    backgroundColor: getModelColor(model.id)
+                                  }}
+                                >
+                                  {model.id.split('/')[0]?.charAt(0)?.toUpperCase() || '?'}
+                                </div>
+                              </div>
+                              <div>
+                                <div className="font-medium text-white">
+                                  {model.name || formatModelName(model.id)}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>

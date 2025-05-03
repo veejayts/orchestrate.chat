@@ -89,6 +89,48 @@ export async function saveMessage(
   }
 }
 
+// Save a message to the database with streaming support
+export async function saveStreamingMessage(
+  chatId: string,
+  initialContent: string,
+  source: string
+): Promise<string | null> {
+  try {
+    // Create the initial empty message
+    const { data, error } = await supabase
+      .from('chats')
+      .insert([{ chatid: chatId, message: initialContent, source }])
+      .select('messageid');
+    
+    if (error) throw error;
+    
+    return data && data[0] ? data[0].messageid : null;
+  } catch (error) {
+    console.error('Error saving streaming message:', error);
+    return null;
+  }
+}
+
+// Update an existing streaming message with additional content
+export async function updateStreamingMessage(
+  messageId: string,
+  content: string
+): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from('chats')
+      .update({ message: content })
+      .eq('messageid', messageId);
+    
+    if (error) throw error;
+    
+    return true;
+  } catch (error) {
+    console.error('Error updating streaming message:', error);
+    return false;
+  }
+}
+
 // Get all messages for a chat
 export async function getChatMessages(chatId: string): Promise<ChatMessageDB[]> {
   try {

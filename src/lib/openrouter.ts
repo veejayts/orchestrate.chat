@@ -13,6 +13,19 @@ export interface ChatCompletionResponse {
   }[];
 }
 
+export interface ChatCompletionChunk {
+  id: string;
+  model: string;
+  choices: {
+    delta: {
+      content?: string;
+      role?: string;
+    };
+    finish_reason: string | null;
+    index: number;
+  }[];
+}
+
 export interface OpenRouterModel {
   id: string;
   name: string;
@@ -91,4 +104,92 @@ export async function getChatCompletion(
     ...data,
     model: model
   };
+}
+
+export async function getChatCompletionStream(
+  messages: ChatMessage[],
+  model: string = 'google/gemini-2.0-flash-001',
+  onChunk: (chunk: ChatCompletionChunk) => void,
+  onDone: () => void,
+  onError: (error: Error) => void
+): Promise<void> {
+  const apiKey = process.env.NEXT_PUBLIC_OPENROUTER_API_KEY;
+  
+  if (!apiKey) {
+    onError(new Error('OpenRouter API key is not set'));
+    return;
+  }
+
+  // Format the request body with streaming enabled
+  const requestBody = {
+    "model": model,
+    "messages": messages,
+    "stream": true
+  };
+
+  try {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        'HTTP-Referer': process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000',
+        'X-Title': 'Orchestrate Chat'
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      onError(new Error(`OpenRouter API error: ${error}`));
+      return;
+    }
+
+    if (!response.body) {
+      onError(new Error('Response body is null'));
+      return;
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      
+      if (done) {
+        onDone();
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      
+      // Process complete SSE lines
+      let lineEnd;
+      while ((lineEnd = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, lineEnd).trim();
+        buffer = buffer.slice(lineEnd + 1);
+        
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          
+          if (data === '[DONE]') {
+            onDone();
+            break;
+          }
+          
+          try {
+            const chunk = JSON.parse(data) as ChatCompletionChunk;
+            // Ensure we're using the same model ID that we sent in the request
+            chunk.model = model;
+            onChunk(chunk);
+          } catch (e) {
+            // Ignore comments or malformed JSON
+          }
+        }
+      }
+    }
+  } catch (error) {
+    onError(error instanceof Error ? error : new Error(String(error)));
+  }
 }
