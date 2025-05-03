@@ -41,6 +41,7 @@ export interface Chat {
   chatId: string;
   title: string;
   created_at: string;
+  user_id?: string;
 }
 
 export interface ChatMessageDB {
@@ -51,12 +52,29 @@ export interface ChatMessageDB {
   created_at?: string;
 }
 
+// Helper function to get current user ID
+export async function getCurrentUserId(): Promise<string | null> {
+  try {
+    const { data } = await supabase.auth.getSession();
+    return data.session?.user?.id || null;
+  } catch (error) {
+    console.error('Error getting current user:', error);
+    return null;
+  }
+}
+
 // Create a new chat and return the chatId
 export async function createChat(title: string = 'New Chat'): Promise<string | null> {
   try {
+    const userId = await getCurrentUserId();
+    if (!userId) {
+      console.error('User not authenticated');
+      return null;
+    }
+
     const { data, error } = await supabase
       .from('chats_meta')
-      .insert([{ title }])
+      .insert([{ title, user_id: userId }])
       .select('chatid');
     
     if (error) throw error;
@@ -75,12 +93,36 @@ export async function saveMessage(
   source: string
 ): Promise<string | null> {
   try {
+    // Get the user ID
+    const userId = await getCurrentUserId();
+    if (!userId) {
+      console.error('User not authenticated');
+      return null;
+    }
+    
+    // First verify this user owns the chat
+    const { data: chatData, error: chatError } = await supabase
+      .from('chats_meta')
+      .select('chatid')
+      .eq('chatid', chatId)
+      .eq('user_id', userId)
+      .single();
+    
+    if (chatError || !chatData) {
+      console.error('Chat not found or user does not have access', chatError);
+      return null;
+    }
+    
+    // Now insert the message
     const { data, error } = await supabase
       .from('chats')
       .insert([{ chatid: chatId, message, source }])
       .select('messageid');
     
-    if (error) throw error;
+    if (error) {
+      console.error('Error inserting message:', error);
+      throw error;
+    }
     
     return data && data[0] ? data[0].messageid : null;
   } catch (error) {
@@ -96,13 +138,36 @@ export async function saveStreamingMessage(
   source: string
 ): Promise<string | null> {
   try {
-    // Create the initial empty message
+    // Get the user ID
+    const userId = await getCurrentUserId();
+    if (!userId) {
+      console.error('User not authenticated');
+      return null;
+    }
+    
+    // First verify this user owns the chat
+    const { data: chatData, error: chatError } = await supabase
+      .from('chats_meta')
+      .select('chatid')
+      .eq('chatid', chatId)
+      .eq('user_id', userId)
+      .single();
+    
+    if (chatError || !chatData) {
+      console.error('Chat not found or user does not have access', chatError);
+      return null;
+    }
+    
+    // Now insert the message
     const { data, error } = await supabase
       .from('chats')
       .insert([{ chatid: chatId, message: initialContent, source }])
       .select('messageid');
     
-    if (error) throw error;
+    if (error) {
+      console.error('Error inserting streaming message:', error);
+      throw error;
+    }
     
     return data && data[0] ? data[0].messageid : null;
   } catch (error) {
@@ -117,12 +182,48 @@ export async function updateStreamingMessage(
   content: string
 ): Promise<boolean> {
   try {
+    // Get the user ID
+    const userId = await getCurrentUserId();
+    if (!userId) {
+      console.error('User not authenticated');
+      return false;
+    }
+    
+    // First verify this user owns the chat that contains this message
+    const { data: messageData, error: messageError } = await supabase
+      .from('chats')
+      .select('chatid')
+      .eq('messageid', messageId)
+      .single();
+    
+    if (messageError || !messageData) {
+      console.error('Message not found', messageError);
+      return false;
+    }
+    
+    // Now verify the user owns the chat
+    const { data: chatData, error: chatError } = await supabase
+      .from('chats_meta')
+      .select('chatid')
+      .eq('chatid', messageData.chatid)
+      .eq('user_id', userId)
+      .single();
+    
+    if (chatError || !chatData) {
+      console.error('Chat not found or user does not have access', chatError);
+      return false;
+    }
+    
+    // Now update the message
     const { error } = await supabase
       .from('chats')
       .update({ message: content })
       .eq('messageid', messageId);
     
-    if (error) throw error;
+    if (error) {
+      console.error('Error updating message:', error);
+      throw error;
+    }
     
     return true;
   } catch (error) {
@@ -134,6 +235,7 @@ export async function updateStreamingMessage(
 // Get all messages for a chat
 export async function getChatMessages(chatId: string): Promise<ChatMessageDB[]> {
   try {
+    // RLS policies will handle access control
     const { data, error } = await supabase
       .from('chats')
       .select('*')
@@ -149,9 +251,10 @@ export async function getChatMessages(chatId: string): Promise<ChatMessageDB[]> 
   }
 }
 
-// Get all chats for a user
+// Get all chats for the current user
 export async function getUserChats(): Promise<Chat[]> {
   try {
+    // RLS policies will automatically filter to only show the current user's chats
     const { data, error } = await supabase
       .from('chats_meta')
       .select('*')
@@ -162,7 +265,8 @@ export async function getUserChats(): Promise<Chat[]> {
     return data?.map(chat => ({
       chatId: chat.chatid,
       title: chat.title,
-      created_at: chat.created_at
+      created_at: chat.created_at,
+      user_id: chat.user_id
     })) || [];
   } catch (error) {
     console.error('Error getting user chats:', error);
@@ -175,13 +279,15 @@ export function dbMessagesToChatMessages(messages: ChatMessageDB[]): ChatMessage
   return messages.map(msg => ({
     role: msg.source === 'user' ? 'user' : 'assistant' as 'user' | 'assistant',
     content: msg.message,
-    model: msg.source !== 'user' ? msg.source : undefined
+    model: msg.source !== 'user' ? msg.source : undefined,
+    messageid: msg.messageid
   }));
 }
 
 // Update the chat title
 export async function updateChatTitle(chatId: string, title: string): Promise<boolean> {
   try {
+    // RLS policies will handle access control
     const { error } = await supabase
       .from('chats_meta')
       .update({ title })
@@ -200,6 +306,7 @@ export async function updateChatTitle(chatId: string, title: string): Promise<bo
 export async function deleteChat(chatId: string): Promise<boolean> {
   try {
     // First delete all chat messages
+    // RLS policies will handle access control
     const { error: messagesError } = await supabase
       .from('chats')
       .delete()
@@ -208,6 +315,7 @@ export async function deleteChat(chatId: string): Promise<boolean> {
     if (messagesError) throw messagesError;
     
     // Then delete the chat metadata
+    // RLS policies will handle access control
     const { error: metaError } = await supabase
       .from('chats_meta')
       .delete()
@@ -231,6 +339,7 @@ export async function deleteMessage(messageId: string): Promise<boolean> {
   }
 
   try {
+    // RLS policies will handle access control
     const { error } = await supabase
       .from('chats')
       .delete()

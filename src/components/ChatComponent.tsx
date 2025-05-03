@@ -1047,6 +1047,41 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                             >
                               🗑️
                             </button>
+                            {/* Copy button for convenience */}
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(message.content);
+                                // Show a temporary tooltip or notification
+                                const tooltip = document.createElement('div');
+                                tooltip.textContent = 'Copied!';
+                                tooltip.style.position = 'absolute';
+                                tooltip.style.right = '20px';
+                                tooltip.style.top = '0';
+                                tooltip.style.backgroundColor = '#3b82f6';
+                                tooltip.style.color = 'white';
+                                tooltip.style.padding = '2px 6px';
+                                tooltip.style.borderRadius = '4px';
+                                tooltip.style.fontSize = '12px';
+                                tooltip.style.opacity = '0';
+                                tooltip.style.transition = 'opacity 0.2s';
+                                
+                                const messageElement = document.activeElement?.closest('.message-content');
+                                if (messageElement) {
+                                  messageElement.appendChild(tooltip);
+                                  // Fade in
+                                  setTimeout(() => { tooltip.style.opacity = '1'; }, 10);
+                                  // Fade out and remove
+                                  setTimeout(() => { 
+                                    tooltip.style.opacity = '0';
+                                    setTimeout(() => tooltip.remove(), 200);
+                                  }, 1000);
+                                }
+                              }}
+                              className="p-1 text-blue-400 hover:text-blue-300 transition-colors"
+                              aria-label="Copy message"
+                            >
+                              📋
+                            </button>
                           </div>
                         )}
                       </div>
