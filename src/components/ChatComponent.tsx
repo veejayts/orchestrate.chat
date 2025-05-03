@@ -352,16 +352,16 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
             </form>
             <div className="flex mt-2 justify-between items-center text-xs text-zinc-500">
               <div className="hidden sm:block">Press Enter to send</div>
-              <div className="relative" ref={dropdownRef}>
+              <div className="relative flex justify-end w-full sm:w-auto" ref={dropdownRef}>
                 <button 
                   onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
-                  className="hover:text-white cursor-pointer transition-colors"
+                  className="hover:text-white cursor-pointer transition-colors ml-auto"
                   aria-label="Select model"
                 >
                   {selectedModel.split('/').pop() || 'AI Model'} ▼
                 </button>
                 {isModelDropdownOpen && (
-                  <div className="absolute bottom-full right-0 z-10 w-64 md:w-72 mb-2 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg overflow-hidden">
+                  <div className="fixed sm:absolute bottom-16 sm:bottom-full right-3 sm:right-0 left-auto z-20 w-[calc(100%-24px)] sm:w-64 md:w-72 mb-0 sm:mb-2 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg overflow-hidden">
                     <div className="p-2">
                       <input
                         type="text"
