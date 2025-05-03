@@ -25,6 +25,33 @@ import {
 } from '@/lib/supabase';
 import Sidebar from './Sidebar';
 
+// OpenRouter import types
+interface OpenRouterExport {
+  version: string;
+  characters: {
+    [key: string]: {
+      model: string;
+      modelInfo: any;
+      id: string;
+      updatedAt: string;
+      description: string;
+    }
+  };
+  messages: {
+    [key: string]: {
+      characterId: string;
+      content: string;
+      id: string;
+      updatedAt: string;
+      isGenerating?: boolean;
+      metadata?: any;
+      citations?: any[];
+      files?: any[];
+      attachments?: any[];
+    }
+  }
+}
+
 // Sample suggestion questions
 const SUGGESTIONS = [
   "How does AI work?",
@@ -55,9 +82,12 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
   const [abortController, setAbortController] = useState<AbortController | null>(null);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [isAddingMessage, setIsAddingMessage] = useState<boolean>(false); // Add a state to track when we're adding a new message
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingContent, setEditingContent] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const editTextareaRef = useRef<HTMLTextAreaElement>(null);
   // Add a ref to track scroll position
   const scrollPositionRef = useRef<number>(0);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -206,6 +236,96 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     }));
     
     setMessages(enhancedMessages);
+  };
+
+  // Function to import OpenRouter conversations
+  const importOpenRouterConversation = async (data: OpenRouterExport) => {
+    try {
+      // Validate the format
+      if (!data.version || !data.messages || !data.characters) {
+        throw new Error('Invalid OpenRouter conversation format');
+      }
+
+      // Get the messages in chronological order
+      const messagesArray = Object.values(data.messages);
+      
+      // Sort by updatedAt timestamp
+      messagesArray.sort((a, b) => {
+        return new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
+      });
+
+      // Create a new chat
+      const chatId = await createChat('Imported Conversation');
+      if (!chatId) {
+        throw new Error('Failed to create a new chat');
+      }
+
+      // Get the title from the first message (truncate if needed)
+      if (messagesArray.length > 0) {
+        const firstMessage = messagesArray[0];
+        const chatTitle = firstMessage.content.length > 25
+          ? firstMessage.content.substring(0, 25) + '...'
+          : firstMessage.content;
+        
+        await updateChatTitle(chatId, chatTitle);
+      }
+
+      // Process and save each message
+      for (const message of messagesArray) {
+        // Determine if it's a user or assistant message
+        const isUserMessage = message.characterId === 'USER';
+        
+        // Get the model information for assistant messages
+        let modelName = 'assistant';
+        if (!isUserMessage && message.characterId && data.characters[message.characterId]) {
+          modelName = data.characters[message.characterId].model || 'assistant';
+        }
+
+        // Save the message to the database
+        await saveMessage(
+          chatId,
+          message.content,
+          isUserMessage ? 'user' : modelName
+        );
+      }
+
+      // Refresh chat list and switch to the new chat
+      await loadUserChats();
+      setActiveChatId(chatId);
+      
+      return true;
+    } catch (error) {
+      console.error('Error importing conversation:', error);
+      return false;
+    }
+  };
+
+  // Handle file upload
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const content = e.target?.result as string;
+        const data = JSON.parse(content) as OpenRouterExport;
+        
+        const success = await importOpenRouterConversation(data);
+        if (success) {
+          alert('Conversation imported successfully!');
+        } else {
+          alert('Failed to import conversation. Check console for details.');
+        }
+      } catch (error) {
+        console.error('Error parsing file:', error);
+        alert('Failed to parse file. Please make sure it\'s a valid JSON file.');
+      }
+    };
+    reader.readAsText(file);
+    
+    // Reset the input value so the same file can be selected again
+    event.target.value = '';
   };
 
   // Handle streaming submission
@@ -616,29 +736,97 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                     <div
                       className={
                         message.role === 'user'
-                          ? 'chat-message-user'
-                          : 'chat-message-assistant'
+                          ? 'chat-message-user relative group'
+                          : 'chat-message-assistant relative group'
                       }
                     >
-                      <div className="message-content relative group">
-                        <ReactMarkdown
-                          components={{
-                            // Use proper spacing for single-line messages
-                            p: ({node, ...props}) => <p style={{marginBottom: '0'}} {...props} />
-                          }}
-                        >
-                          {message.content}
-                        </ReactMarkdown>
-                        
-                        {/* Delete button - visible only on hover */}
-                        {message.messageid && (
-                          <button
-                            onClick={() => handleDeleteMessage(message.messageid!)}
-                            className="absolute top-0 right-0 p-1.5 text-red-400 opacity-0 group-hover:opacity-100 hover:text-red-300 transition-opacity duration-200 bg-zinc-800 rounded-md"
-                            aria-label="Delete message"
+                      <div className="message-content">
+                        {editingMessageId === message.messageid ? (
+                          <div className="edit-mode w-full">
+                            <textarea
+                              ref={editTextareaRef}
+                              value={editingContent}
+                              onChange={(e) => setEditingContent(e.target.value)}
+                              className="w-full bg-zinc-900 text-white p-2 rounded border border-zinc-700 min-h-[120px] text-base resize-vertical"
+                              autoFocus
+                              style={{ 
+                                minWidth: "300px",
+                                height: "300px",
+                              }}
+                            />
+                            <div className="flex justify-end mt-2 space-x-2">
+                              <button
+                                onClick={() => {
+                                  setEditingMessageId(null);
+                                  setEditingContent('');
+                                }}
+                                className="px-3 py-1 text-xs bg-zinc-700 hover:bg-zinc-600 rounded-md transition-colors"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  if (message.messageid && editingContent.trim()) {
+                                    // Save the edited message to the database
+                                    await updateStreamingMessage(message.messageid, editingContent.trim());
+                                    
+                                    // Update the message in the UI
+                                    setMessages(messages.map(m => 
+                                      m.messageid === message.messageid 
+                                        ? { ...m, content: editingContent.trim() } 
+                                        : m
+                                    ));
+                                    
+                                    // Exit edit mode
+                                    setEditingMessageId(null);
+                                    setEditingContent('');
+                                  }
+                                }}
+                                className="px-3 py-1 text-xs bg-purple-700 hover:bg-purple-600 rounded-md transition-colors"
+                              >
+                                Save
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <ReactMarkdown
+                            components={{
+                              // Use proper spacing for single-line messages
+                              p: ({node, ...props}) => <p style={{marginBottom: '0'}} {...props} />
+                            }}
                           >
-                            🗑️
-                          </button>
+                            {message.content}
+                          </ReactMarkdown>
+                        )}
+                        
+                        {/* Message action buttons - visible only on hover */}
+                        {message.messageid && !editingMessageId && (
+                          <div className="absolute top-0 right-0 p-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex space-x-1 bg-zinc-800 rounded-md z-10">
+                            {message.role === 'user' && (
+                              <button
+                                onClick={() => {
+                                  setEditingMessageId(message.messageid!);
+                                  setEditingContent(message.content);
+                                  setTimeout(() => {
+                                    if (editTextareaRef.current) {
+                                      editTextareaRef.current.focus();
+                                    }
+                                  }, 10);
+                                }}
+                                className="p-1 text-blue-400 hover:text-blue-300 transition-colors"
+                                aria-label="Edit message"
+                              >
+                                ✏️
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleDeleteMessage(message.messageid!)}
+                              className="p-1 text-red-400 hover:text-red-300 transition-colors"
+                              aria-label="Delete message"
+                            >
+                              🗑️
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -770,6 +958,18 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                       </div>
                     </div>
                   )}
+                </div>
+                <div className="relative flex justify-end">
+                  <label htmlFor="fileUpload" className="cursor-pointer hover:text-white transition-colors">
+                    Import Conversation
+                  </label>
+                  <input
+                    id="fileUpload"
+                    type="file"
+                    accept=".json"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
                 </div>
               </div>
             </div>
