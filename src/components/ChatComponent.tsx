@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ChatMessage, getChatCompletion } from '@/lib/openrouter';
-import { createChat, saveMessage, getChatMessages, getUserChats, dbMessagesToChatMessages, Chat } from '@/lib/supabase';
+import { createChat, saveMessage, getChatMessages, getUserChats, dbMessagesToChatMessages, Chat, updateChatTitle } from '@/lib/supabase';
 import Sidebar from './Sidebar';
 
 // Sample suggestion questions
@@ -72,6 +72,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
 
     // Create a new chat if one doesn't exist
     let currentChatId = activeChatId;
+    let isNewChat = false;
     if (!currentChatId) {
       const chatId = await createChat();
       if (!chatId) {
@@ -80,6 +81,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
       }
       currentChatId = chatId;
       setActiveChatId(chatId);
+      isNewChat = true;
       // Add the new chat to the user's chats
       loadUserChats();
     }
@@ -92,6 +94,17 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
 
     // Save user message to database
     await saveMessage(currentChatId, messageText, 'user');
+
+    // Update chat title if this is the first message in a new chat
+    if (isNewChat || messages.length === 0) {
+      // Get first 25 characters for title
+      const chatTitle = messageText.length > 25 
+        ? messageText.substring(0, 25) + '...' 
+        : messageText;
+      
+      await updateChatTitle(currentChatId, chatTitle);
+      loadUserChats(); // Refresh chat list to show new title
+    }
 
     try {
       // Prepare conversation history for API call
@@ -141,6 +154,13 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     setActiveChatId(chatId);
   };
 
+  const handleUpdateChatTitle = async (chatId: string, newTitle: string) => {
+    const success = await updateChatTitle(chatId, newTitle);
+    if (success) {
+      loadUserChats(); // Refresh the chat list with updated titles
+    }
+  };
+
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar 
@@ -150,6 +170,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
         chats={userChats}
         activeChatId={activeChatId}
         onSelectChat={handleSelectChat}
+        onUpdateChatTitle={handleUpdateChatTitle}
       />
       
       <main className="flex-1 flex flex-col h-screen">

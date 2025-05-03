@@ -9,6 +9,7 @@ interface SidebarProps {
   chats?: Chat[];
   activeChatId: string | null;
   onSelectChat: (chatId: string) => void;
+  onUpdateChatTitle?: (chatId: string, newTitle: string) => Promise<void>;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ 
@@ -17,8 +18,12 @@ const Sidebar: React.FC<SidebarProps> = ({
   onSignOut, 
   chats = [], 
   activeChatId,
-  onSelectChat
+  onSelectChat,
+  onUpdateChatTitle
 }) => {
+  const [editingChatId, setEditingChatId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState<string>('');
+  
   // Get today and yesterday dates for grouping
   const today = new Date();
   const yesterday = new Date(today);
@@ -45,6 +50,63 @@ const Sidebar: React.FC<SidebarProps> = ({
       groupedChats.older.push(chat);
     }
   });
+
+  const handleDoubleClick = (chat: Chat) => {
+    if (!onUpdateChatTitle) return;
+    setEditingChatId(chat.chatId);
+    setEditingTitle(chat.title);
+  };
+
+  const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setEditingTitle(e.target.value);
+  };
+
+  const handleTitleBlur = async () => {
+    if (editingChatId && editingTitle.trim() !== '' && onUpdateChatTitle) {
+      await onUpdateChatTitle(editingChatId, editingTitle);
+    }
+    setEditingChatId(null);
+  };
+
+  const handleTitleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleTitleBlur();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setEditingChatId(null);
+    }
+  };
+
+  const renderChatItem = (chat: Chat) => {
+    const isEditing = chat.chatId === editingChatId;
+    
+    if (isEditing) {
+      return (
+        <input
+          type="text"
+          className="w-full px-2 py-1 bg-zinc-700 border border-zinc-600 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-purple-500"
+          value={editingTitle}
+          onChange={handleTitleChange}
+          onBlur={handleTitleBlur}
+          onKeyDown={handleTitleKeyDown}
+          autoFocus
+        />
+      );
+    }
+
+    return (
+      <div 
+        className={`px-2 py-2 text-sm rounded-lg hover:bg-zinc-800/50 cursor-pointer ${
+          activeChatId === chat.chatId ? 'bg-zinc-800' : ''
+        }`}
+        onClick={() => onSelectChat(chat.chatId)}
+        onDoubleClick={() => handleDoubleClick(chat)}
+      >
+        {chat.title}
+      </div>
+    );
+  };
 
   return (
     <div className="sidebar h-screen w-60 flex flex-col border-r border-zinc-800">
@@ -82,14 +144,8 @@ const Sidebar: React.FC<SidebarProps> = ({
             </div>
             <div className="space-y-1 mt-1">
               {groupedChats.today.map(chat => (
-                <div 
-                  key={chat.chatId} 
-                  className={`px-2 py-2 text-sm rounded-lg hover:bg-zinc-800/50 cursor-pointer ${
-                    activeChatId === chat.chatId ? 'bg-zinc-800' : ''
-                  }`}
-                  onClick={() => onSelectChat(chat.chatId)}
-                >
-                  {chat.title}
+                <div key={chat.chatId}>
+                  {renderChatItem(chat)}
                 </div>
               ))}
             </div>
@@ -104,14 +160,8 @@ const Sidebar: React.FC<SidebarProps> = ({
             </div>
             <div className="space-y-1 mt-1">
               {groupedChats.yesterday.map(chat => (
-                <div 
-                  key={chat.chatId} 
-                  className={`px-2 py-2 text-sm rounded-lg hover:bg-zinc-800/50 cursor-pointer ${
-                    activeChatId === chat.chatId ? 'bg-zinc-800' : ''
-                  }`}
-                  onClick={() => onSelectChat(chat.chatId)}
-                >
-                  {chat.title}
+                <div key={chat.chatId}>
+                  {renderChatItem(chat)}
                 </div>
               ))}
             </div>
@@ -126,14 +176,8 @@ const Sidebar: React.FC<SidebarProps> = ({
             </div>
             <div className="space-y-1 mt-1">
               {groupedChats.older.map(chat => (
-                <div 
-                  key={chat.chatId} 
-                  className={`px-2 py-2 text-sm rounded-lg hover:bg-zinc-800/50 cursor-pointer ${
-                    activeChatId === chat.chatId ? 'bg-zinc-800' : ''
-                  }`}
-                  onClick={() => onSelectChat(chat.chatId)}
-                >
-                  {chat.title}
+                <div key={chat.chatId}>
+                  {renderChatItem(chat)}
                 </div>
               ))}
             </div>
