@@ -27,8 +27,31 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
   const [selectedModel, setSelectedModel] = useState<string>('google/gemini-2.0-flash-001');
   const [availableModels, setAvailableModels] = useState<OpenRouterModel[]>([]);
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState<boolean>(false);
+  const [modelSearchQuery, setModelSearchQuery] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsModelDropdownOpen(false);
+      }
+    };
+    
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  // Reset search query when closing dropdown
+  useEffect(() => {
+    if (!isModelDropdownOpen) {
+      setModelSearchQuery('');
+    }
+  }, [isModelDropdownOpen]);
 
   // Load user chats
   useEffect(() => {
@@ -182,6 +205,16 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     setSelectedModel(modelId);
   };
 
+  const getModelColor = (modelId: string) => {
+    if (modelId.includes('microsoft')) return 'blue';
+    if (modelId.includes('qwen')) return 'purple';
+    return 'gray';
+  };
+
+  const formatModelName = (modelId: string) => {
+    return modelId.split('/').pop() || 'Unknown Model';
+  };
+
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar 
@@ -294,7 +327,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
             </form>
             <div className="flex mt-2 justify-between items-center text-xs text-zinc-500">
               <div>Press Enter to send</div>
-              <div className="relative">
+              <div className="relative" ref={dropdownRef}>
                 <button 
                   onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
                   className="hover:text-white cursor-pointer transition-colors"
@@ -303,24 +336,50 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                   {selectedModel.split('/').pop() || 'AI Model'} ▼
                 </button>
                 {isModelDropdownOpen && (
-                  <div className="absolute bottom-full right-0 z-10 w-56 mb-2 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg overflow-hidden">
-                    {availableModels.map((model) => (
-                      <div
-                        key={model.id}
-                        className={`px-3 py-2 text-sm hover:bg-zinc-700 cursor-pointer ${
-                          selectedModel === model.id ? 'bg-purple-900/40 font-medium' : ''
-                        }`}
-                        onClick={() => {
-                          setSelectedModel(model.id);
-                          setIsModelDropdownOpen(false);
-                        }}
-                      >
-                        <div className="font-medium">{model.name}</div>
-                        {model.description && (
-                          <div className="text-xs text-zinc-400 truncate mt-0.5">{model.description}</div>
-                        )}
-                      </div>
-                    ))}
+                  <div className="absolute bottom-full right-0 z-10 w-72 mb-2 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg overflow-hidden">
+                    <div className="p-2">
+                      <input
+                        type="text"
+                        value={modelSearchQuery}
+                        onChange={(e) => setModelSearchQuery(e.target.value)}
+                        placeholder="Search models"
+                        className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-md focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      />
+                    </div>
+                    <div className="max-h-80 overflow-y-auto">
+                      {availableModels
+                        .filter((model) => 
+                          model.name.toLowerCase().includes(modelSearchQuery.toLowerCase()) ||
+                          model.id.toLowerCase().includes(modelSearchQuery.toLowerCase())
+                        )
+                        .map((model) => (
+                          <div
+                            key={model.id}
+                            className={`px-3 py-2 text-sm hover:bg-zinc-700 cursor-pointer flex items-center ${
+                              selectedModel === model.id ? 'bg-purple-900/40 font-medium' : ''
+                            }`}
+                            onClick={() => {
+                              setSelectedModel(model.id);
+                              setIsModelDropdownOpen(false);
+                            }}
+                          >
+                            <div className="mr-2">
+                              <div className="w-6 h-6 rounded-full flex items-center justify-center" 
+                                style={{
+                                  backgroundColor: getModelColor(model.id)
+                                }}
+                              >
+                                {model.id.split('/')[0]?.charAt(0)?.toUpperCase() || '?'}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="font-medium">
+                                {model.name || formatModelName(model.id)}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
                   </div>
                 )}
               </div>
