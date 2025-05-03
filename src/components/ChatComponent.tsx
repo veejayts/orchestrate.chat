@@ -49,6 +49,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [enableStreaming, setEnableStreaming] = useState<boolean>(true);
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -207,6 +208,10 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
       // Accumulated content for database updates
       let accumulatedContent = '';
       
+      // Create a new AbortController for this request
+      const controller = new AbortController();
+      setAbortController(controller);
+      
       // Handle streaming chunks
       await getChatCompletionStream(
         conversationHistory,
@@ -244,9 +249,14 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
           }
           setIsLoading(false);
           setStreamingMessageId(null);
+          setAbortController(null);
         },
         (error) => {
           console.error('Error during streaming:', error);
+          
+          // Check if this was an abort error (user canceled the request)
+          const wasAborted = error.name === 'AbortError' || error.message === 'Request aborted';
+          
           // Handle error in UI
           setMessages((prevMessages) => {
             const newMessages = [...prevMessages];
@@ -254,12 +264,14 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
             
             if (lastMessageIndex >= 0 && newMessages[lastMessageIndex].role === 'assistant') {
               if (accumulatedContent) {
-                // Keep what we have so far and add error message
-                newMessages[lastMessageIndex].content = 
-                  accumulatedContent + '\n\n_Error: Message streaming was interrupted._';
+                // Keep what we have so far and add error message if not aborted
+                newMessages[lastMessageIndex].content = accumulatedContent + 
+                  (wasAborted ? '\n\n_Generation stopped._' : '\n\n_Error: Message streaming was interrupted._');
               } else {
-                // Replace empty message with error
-                newMessages[lastMessageIndex].content = 'Sorry, there was an error processing your request.';
+                // Replace empty message with error or abort message
+                newMessages[lastMessageIndex].content = wasAborted 
+                  ? 'Generation stopped.'
+                  : 'Sorry, there was an error processing your request.';
               }
             }
             
@@ -269,14 +281,21 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
           // Save error state to database
           if (messageId) {
             const errorMessage = accumulatedContent 
-              ? accumulatedContent + '\n\n_Error: Message streaming was interrupted._'
-              : 'Sorry, there was an error processing your request.';
+              ? accumulatedContent + (wasAborted 
+                  ? '\n\n_Generation stopped._' 
+                  : '\n\n_Error: Message streaming was interrupted._')
+              : wasAborted 
+                ? 'Generation stopped.'
+                : 'Sorry, there was an error processing your request.';
+                
             updateStreamingMessage(messageId, errorMessage).catch(console.error);
           }
           
           setIsLoading(false);
           setStreamingMessageId(null);
-        }
+          setAbortController(null);
+        },
+        controller.signal
       );
     } catch (error) {
       console.error('Error setting up streaming:', error);
@@ -286,6 +305,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
       // Save error message to database
       await saveMessage(currentChatId, errorMessage.content, 'system');
       setIsLoading(false);
+      setAbortController(null);
     }
   };
 
@@ -341,8 +361,12 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
       // Format conversation history exactly as specified
       const conversationHistory = [...messages, userMessage];
       
+      // Create a new AbortController for this request
+      const controller = new AbortController();
+      setAbortController(controller);
+      
       // Get AI response using the selected model
-      const response = await getChatCompletion(conversationHistory, selectedModel);
+      const response = await getChatCompletion(conversationHistory, selectedModel, controller.signal);
       
       if (response.choices && response.choices.length > 0) {
         const assistantMessage = response.choices[0].message;
@@ -353,13 +377,22 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
       }
     } catch (error) {
       console.error('Error getting chat completion:', error);
-      const errorMessage = { role: 'assistant' as const, content: 'Sorry, there was an error processing your request.' };
+      
+      // Check if this was an abort error (user canceled the request)
+      const wasAborted = error instanceof Error && 
+        (error.name === 'AbortError' || error.message === 'Request aborted');
+      
+      const errorMessage = { 
+        role: 'assistant' as const, 
+        content: wasAborted ? 'Generation stopped.' : 'Sorry, there was an error processing your request.' 
+      };
       setMessages((prev) => [...prev, errorMessage]);
       
       // Save error message to database
       await saveMessage(currentChatId, errorMessage.content, 'system');
     } finally {
       setIsLoading(false);
+      setAbortController(null);
     }
   };
 
@@ -526,6 +559,18 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                   disabled={isLoading}
                 />
                 <div className="flex items-center pl-2">
+                  {isLoading && abortController && (
+                    <button
+                      type="button"
+                      onClick={() => abortController.abort()}
+                      className="p-2 rounded-md text-red-400 hover:text-red-300 transition-colors mr-1"
+                      aria-label="Stop generation"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clipRule="evenodd" />
+                      </svg>
+                    </button>
+                  )}
                   <div className="flex items-center border-l border-zinc-700/50 pl-2">
                     <button
                       type="submit"
@@ -611,10 +656,8 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                                   {model.id.split('/')[0]?.charAt(0)?.toUpperCase() || '?'}
                                 </div>
                               </div>
-                              <div>
-                                <div className="font-medium text-white">
-                                  {model.name || formatModelName(model.id)}
-                                </div>
+                              <div className="font-medium text-white">
+                                {model.name || formatModelName(model.id)}
                               </div>
                             </div>
                           ))}

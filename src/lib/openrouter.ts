@@ -66,7 +66,8 @@ export async function getAvailableModels(): Promise<OpenRouterModel[]> {
 
 export async function getChatCompletion(
   messages: ChatMessage[],
-  model: string = 'google/gemini-2.0-flash-001'
+  model: string = 'google/gemini-2.0-flash-001',
+  signal?: AbortSignal
 ): Promise<ChatCompletionResponse> {
   const apiKey = process.env.NEXT_PUBLIC_OPENROUTER_API_KEY;
   
@@ -89,6 +90,7 @@ export async function getChatCompletion(
       'X-Title': 'Orchestrate Chat'
     },
     body: JSON.stringify(requestBody),
+    signal, // Add the abort signal
   });
 
   if (!response.ok) {
@@ -111,7 +113,8 @@ export async function getChatCompletionStream(
   model: string = 'google/gemini-2.0-flash-001',
   onChunk: (chunk: ChatCompletionChunk) => void,
   onDone: () => void,
-  onError: (error: Error) => void
+  onError: (error: Error) => void,
+  signal?: AbortSignal
 ): Promise<void> {
   const apiKey = process.env.NEXT_PUBLIC_OPENROUTER_API_KEY;
   
@@ -137,6 +140,7 @@ export async function getChatCompletionStream(
         'X-Title': 'Orchestrate Chat'
       },
       body: JSON.stringify(requestBody),
+      signal, // Add the abort signal
     });
 
     if (!response.ok) {
@@ -153,6 +157,14 @@ export async function getChatCompletionStream(
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+
+    // Set up an abort handler if signal is provided
+    if (signal) {
+      signal.addEventListener('abort', () => {
+        reader.cancel().catch(console.error);
+        onError(new Error('Request aborted'));
+      }, { once: true });
+    }
 
     while (true) {
       const { done, value } = await reader.read();
