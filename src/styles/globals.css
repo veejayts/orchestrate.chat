@@ -3,8 +3,8 @@
 @tailwind utilities;
 
 :root {
-  --foreground-rgb: 224, 224, 230;
-  --background-rgb: 21, 21, 31;
+  --foreground-rgb: 255, 255, 255;
+  --background-rgb: 12, 12, 12;
   --sidebar-bg: 24, 16, 32;
 }
 
@@ -22,11 +22,11 @@ body {
 }
 
 .chat-message-user {
-  @apply bg-purple-600 text-white rounded-lg py-2 px-3 mb-3 max-w-[90%] md:max-w-[85%] self-end;
+  @apply relative bg-purple-800/30 rounded-2xl rounded-tr-sm py-3 px-4 self-end max-w-[90%] sm:max-w-[75%] border border-purple-900/30;
 }
 
 .chat-message-assistant {
-  @apply bg-zinc-800 text-gray-200 rounded-lg py-2 px-3 mb-3 max-w-[90%] md:max-w-[85%] self-start;
+  @apply relative bg-zinc-800/70 rounded-2xl rounded-tl-sm py-3 px-4 self-start max-w-[90%] sm:max-w-[75%] border border-zinc-800;
 }
 
 .message-content {
@@ -34,7 +34,11 @@ body {
 }
 
 .message-content p {
-  @apply mb-1 last:mb-0; /* Reduced margin from mb-2 to mb-1 */
+  @apply mb-3;
+}
+
+.message-content p:last-child {
+  @apply mb-0;
 }
 
 .message-content p:only-child {
@@ -42,16 +46,48 @@ body {
 }
 
 .message-content pre {
-  @apply bg-zinc-900 p-3 rounded-lg my-2 overflow-x-auto text-sm;
+  @apply bg-zinc-900 rounded-md p-3 overflow-x-auto my-3;
 }
 
 .message-content code {
   @apply font-mono bg-zinc-900 px-1 py-0.5 rounded text-sm;
 }
 
+.message-content pre code {
+  @apply bg-transparent p-0;
+}
+
+.message-content ul, .message-content ol {
+  @apply mb-3 pl-6;
+}
+
+.message-content ul {
+  @apply list-disc;
+}
+
+.message-content ol {
+  @apply list-decimal;
+}
+
+.message-content h1, .message-content h2, .message-content h3, 
+.message-content h4, .message-content h5, .message-content h6 {
+  @apply font-bold mt-6 mb-2;
+}
+
+.message-content h1 {
+  @apply text-2xl;
+}
+
+.message-content h2 {
+  @apply text-xl;
+}
+
+.message-content h3 {
+  @apply text-lg;
+}
+
 .suggestion-button {
-  @apply bg-zinc-800/80 hover:bg-zinc-700 text-gray-200 px-4 py-2 rounded-lg 
-  transition-colors duration-200 border border-zinc-700/50 text-sm;
+  @apply rounded-xl bg-zinc-800/50 border border-zinc-800 p-3 text-sm text-zinc-300 hover:border-zinc-700 hover:bg-zinc-800 transition-colors;
 }
 
 .new-chat-button {
@@ -68,9 +104,7 @@ body {
 }
 
 .chat-input-container {
-  @apply bg-zinc-800/30 border border-zinc-700/50 rounded-lg p-2 md:p-3
-  focus-within:ring-1 focus-within:ring-purple-500 focus-within:border-purple-500
-  transition-colors;
+  @apply relative w-full rounded-xl border border-zinc-700 bg-zinc-800/50 backdrop-blur-sm transition-colors focus-within:border-zinc-600;
 }
 
 /* Animation for fade in */
@@ -140,6 +174,39 @@ body {
 
 .animate-fade-out {
   animation: fadeOut 0.3s ease-out forwards;
+}
+
+/* CSS for scrollbar */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+}
+
+.scrollbar-thumb-zinc-700::-webkit-scrollbar-thumb {
+  background-color: rgb(63, 63, 70);
+  border-radius: 3px;
+}
+
+.scrollbar-track-transparent::-webkit-scrollbar-track {
+  background-color: transparent;
+}
+
+/* Styles for delete message button */
+.chat-message-user, .chat-message-assistant {
+  position: relative;
+}
+
+.delete-message-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+
+.group:hover .delete-message-btn {
+  opacity: 0.7;
+}
+
+.delete-message-btn:hover {
+  opacity: 1 !important;
 }
 
 /* Media queries for responsive design */

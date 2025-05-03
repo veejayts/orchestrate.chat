@@ -1,7 +1,28 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { ChatMessage, getChatCompletion, getAvailableModels, OpenRouterModel } from '@/lib/openrouter';
-import { createChat, saveMessage, getChatMessages, getUserChats, dbMessagesToChatMessages, Chat, updateChatTitle } from '@/lib/supabase';
+import { 
+  ChatMessage, 
+  getChatCompletion, 
+  getAvailableModels, 
+  OpenRouterModel, 
+  getChatCompletionStream, 
+  ChatCompletionChunk 
+} from '@/lib/openrouter';
+import { 
+  createChat, 
+  saveMessage, 
+  getChatMessages, 
+  getUserChats, 
+  dbMessagesToChatMessages, 
+  Chat,
+  ChatMessageDB,
+  updateChatTitle, 
+  supabase,
+  saveStreamingMessage,
+  updateStreamingMessage,
+  deleteChat,
+  deleteMessage
+} from '@/lib/supabase';
 import Sidebar from './Sidebar';
 
 // Sample suggestion questions
@@ -29,9 +50,37 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState<boolean>(false);
   const [modelSearchQuery, setModelSearchQuery] = useState<string>('');
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
+  const [enableStreaming, setEnableStreaming] = useState<boolean>(true);
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
+  const [isAddingMessage, setIsAddingMessage] = useState<boolean>(false); // Add a state to track when we're adding a new message
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  // Add a ref to track scroll position
+  const scrollPositionRef = useRef<number>(0);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+
+  // Add this useEffect to handle auth state changes
+  useEffect(() => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') {
+        // Clear chat state on sign out
+        setMessages([]);
+        setActiveChatId(null);
+        setUserChats([]);
+        setInput('');
+        // Note: The parent component (likely page.tsx or layout.tsx)
+        // should handle redirecting the user after sign out.
+      }
+    });
+
+    // Cleanup listener on component unmount
+    return () => {
+      authListener?.subscription.unsubscribe();
+    };
+  }, []); // Empty dependency array ensures this runs only once on mount
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -82,9 +131,54 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     }
   }, [activeChatId]);
 
-  // Scroll to bottom of chat when messages change
+  // Handle deleting a message
+  const handleDeleteMessage = async (messageId: string) => {
+    // Don't attempt to delete if messageId is undefined or empty
+    if (!messageId || messageId === 'undefined') {
+      console.error('Invalid message ID for deletion:', messageId);
+      return;
+    }
+
+    try {
+      // Store current scroll position before deletion
+      const currentScrollTop = chatContainerRef.current?.scrollTop || 0;
+      scrollPositionRef.current = currentScrollTop;
+      
+      // Delete the message from the database
+      const success = await deleteMessage(messageId);
+      
+      if (success) {
+        // Remove the message from the UI
+        setMessages((prevMessages) => 
+          prevMessages.filter(message => message.messageid !== messageId)
+        );
+        
+        // Set a timeout to restore scroll position after the state update and re-render
+        setTimeout(() => {
+          if (chatContainerRef.current) {
+            chatContainerRef.current.scrollTop = scrollPositionRef.current;
+          }
+        }, 0);
+      } else {
+        console.error('Failed to delete message');
+      }
+    } catch (error) {
+      console.error('Error deleting message:', error);
+    }
+  };
+
+  // Scroll to bottom of chat only when new messages are added, not during deletion
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // We'll use our direct scroll position management for deletions
+    if (!chatContainerRef.current) return;
+    
+    // Scroll to bottom for new messages, but not when deleting
+    const messageContainer = chatContainerRef.current;
+    const shouldScrollToBottom = messageContainer.scrollHeight - messageContainer.scrollTop <= messageContainer.clientHeight * 1.2;
+    
+    if (shouldScrollToBottom) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages]);
 
   // Auto-resize textarea as content grows
@@ -101,11 +195,21 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
   };
 
   const loadChatMessages = async (chatId: string) => {
-    const chatMessages = await getChatMessages(chatId);
-    setMessages(dbMessagesToChatMessages(chatMessages));
+    const chatMessagesDb = await getChatMessages(chatId);
+    
+    // Convert DB messages to the format we need, preserving the original messageid
+    const enhancedMessages = chatMessagesDb.map(msg => ({
+      role: msg.source === 'user' ? 'user' : 'assistant' as 'user' | 'assistant',
+      content: msg.message,
+      model: msg.source !== 'user' ? msg.source : undefined,
+      messageid: msg.messageid // Keep consistent with the property name used in the delete button
+    }));
+    
+    setMessages(enhancedMessages);
   };
 
-  const handleSubmit = async (e: React.FormEvent | null, submittedText: string = input) => {
+  // Handle streaming submission
+  const handleStreamingSubmit = async (e: React.FormEvent | null, submittedText: string = input) => {
     if (e) e.preventDefault();
     
     const messageText = submittedText.trim();
@@ -148,11 +252,192 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     }
 
     try {
-      // Prepare conversation history for API call
+      // Format conversation history
       const conversationHistory = [...messages, userMessage];
       
+      // Create initial message in UI
+      const initialAssistantMessage: ChatMessage = { 
+        role: 'assistant', 
+        content: '', 
+        model: selectedModel 
+      };
+      setMessages((prev) => [...prev, initialAssistantMessage]);
+      
+      // Create initial message in database
+      const messageId = await saveStreamingMessage(currentChatId, '', selectedModel);
+      setStreamingMessageId(messageId);
+      
+      // Accumulated content for database updates
+      let accumulatedContent = '';
+      
+      // Create a new AbortController for this request
+      const controller = new AbortController();
+      setAbortController(controller);
+      
+      // Handle streaming chunks
+      await getChatCompletionStream(
+        conversationHistory,
+        selectedModel,
+        (chunk) => {
+          // Update the message content as chunks arrive
+          const contentDelta = chunk.choices[0].delta.content || '';
+          
+          // Only add content if there's something to add
+          if (contentDelta) {
+            accumulatedContent += contentDelta;
+            
+            // Update UI
+            setMessages((prevMessages) => {
+              const newMessages = [...prevMessages];
+              const lastMessageIndex = newMessages.length - 1;
+              
+              if (lastMessageIndex >= 0 && newMessages[lastMessageIndex].role === 'assistant') {
+                newMessages[lastMessageIndex] = {
+                  ...newMessages[lastMessageIndex],
+                  content: accumulatedContent,
+                  model: chunk.model,
+                  messageid: messageId || undefined // Make sure the message ID is still attached
+                };
+              }
+              
+              return newMessages;
+            });
+            
+            // Periodically update the message in the database
+            // Only update every ~100 characters to reduce database writes
+            if (accumulatedContent.length % 100 === 0 && messageId) {
+              // We use a separate call to updateStreamingMessage to avoid race conditions
+              updateStreamingMessage(messageId, accumulatedContent).catch(console.error);
+            }
+          }
+        },
+        () => {
+          // When streaming is complete, save the final message to the database
+          if (messageId && accumulatedContent) {
+            updateStreamingMessage(messageId, accumulatedContent).catch(console.error);
+          }
+          setIsLoading(false);
+          setStreamingMessageId(null);
+          setAbortController(null);
+        },
+        (error) => {
+          console.error('Error during streaming:', error);
+          
+          // Check if this was an abort error (user canceled the request)
+          const wasAborted = error.name === 'AbortError' || error.message === 'Request aborted';
+          
+          // Handle error in UI
+          setMessages((prevMessages) => {
+            const newMessages = [...prevMessages];
+            const lastMessageIndex = newMessages.length - 1;
+            
+            if (lastMessageIndex >= 0 && newMessages[lastMessageIndex].role === 'assistant') {
+              if (accumulatedContent) {
+                // Keep what we have so far and add error message if not aborted
+                newMessages[lastMessageIndex].content = accumulatedContent + 
+                  (wasAborted ? '\n\n_Generation stopped._' : '\n\n_Error: Message streaming was interrupted._');
+              } else {
+                // Replace empty message with error or abort message
+                newMessages[lastMessageIndex].content = wasAborted 
+                  ? 'Generation stopped.'
+                  : 'Sorry, there was an error processing your request.';
+              }
+              // Make sure the message ID is still attached
+              newMessages[lastMessageIndex].messageid = messageId || undefined;
+            }
+            
+            return newMessages;
+          });
+          
+          // Save error state to database
+          if (messageId) {
+            const errorMessage = accumulatedContent 
+              ? accumulatedContent + (wasAborted 
+                  ? '\n\n_Generation stopped._' 
+                  : '\n\n_Error: Message streaming was interrupted._')
+              : wasAborted 
+                ? 'Generation stopped.'
+                : 'Sorry, there was an error processing your request.';
+                
+            updateStreamingMessage(messageId, errorMessage).catch(console.error);
+          }
+          
+          setIsLoading(false);
+          setStreamingMessageId(null);
+          setAbortController(null);
+        },
+        controller.signal
+      );
+    } catch (error) {
+      console.error('Error setting up streaming:', error);
+      const errorMessage = { role: 'assistant' as const, content: 'Sorry, there was an error processing your request.' };
+      setMessages((prev) => [...prev, errorMessage]);
+      
+      // Save error message to database
+      await saveMessage(currentChatId, errorMessage.content, 'system');
+      setIsLoading(false);
+      setAbortController(null);
+    }
+  };
+
+  // Modified handleSubmit to use streaming if enabled
+  const handleSubmit = async (e: React.FormEvent | null, submittedText: string = input) => {
+    if (enableStreaming) {
+      return handleStreamingSubmit(e, submittedText);
+    }
+    
+    // Original non-streaming implementation
+    if (e) e.preventDefault();
+    
+    const messageText = submittedText.trim();
+    if (!messageText || isLoading) return;
+
+    // Create a new chat if one doesn't exist
+    let currentChatId = activeChatId;
+    let isNewChat = false;
+    if (!currentChatId) {
+      const chatId = await createChat();
+      if (!chatId) {
+        console.error('Failed to create a new chat');
+        return;
+      }
+      currentChatId = chatId;
+      setActiveChatId(chatId);
+      isNewChat = true;
+      // Add the new chat to the user's chats
+      loadUserChats();
+    }
+
+    // Add user message to chat
+    const userMessage: ChatMessage = { role: 'user', content: messageText };
+    setMessages((prev) => [...prev, userMessage]);
+    setInput('');
+    setIsLoading(true);
+
+    // Save user message to database
+    await saveMessage(currentChatId, messageText, 'user');
+
+    // Update chat title if this is the first message in a new chat
+    if (isNewChat || messages.length === 0) {
+      // Get first 25 characters for title
+      const chatTitle = messageText.length > 25 
+        ? messageText.substring(0, 25) + '...' 
+        : messageText;
+      
+      await updateChatTitle(currentChatId, chatTitle);
+      loadUserChats(); // Refresh chat list to show new title
+    }
+
+    try {
+      // Format conversation history exactly as specified
+      const conversationHistory = [...messages, userMessage];
+      
+      // Create a new AbortController for this request
+      const controller = new AbortController();
+      setAbortController(controller);
+      
       // Get AI response using the selected model
-      const response = await getChatCompletion(conversationHistory, selectedModel);
+      const response = await getChatCompletion(conversationHistory, selectedModel, controller.signal);
       
       if (response.choices && response.choices.length > 0) {
         const assistantMessage = response.choices[0].message;
@@ -163,13 +448,45 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
       }
     } catch (error) {
       console.error('Error getting chat completion:', error);
-      const errorMessage = { role: 'assistant' as const, content: 'Sorry, there was an error processing your request.' };
+      
+      // Check if this was an abort error (user canceled the request)
+      const wasAborted = error instanceof Error && 
+        (error.name === 'AbortError' || error.message === 'Request aborted');
+      
+      const errorMessage = { 
+        role: 'assistant' as const, 
+        content: wasAborted ? 'Generation stopped.' : 'Sorry, there was an error processing your request.' 
+      };
       setMessages((prev) => [...prev, errorMessage]);
       
       // Save error message to database
       await saveMessage(currentChatId, errorMessage.content, 'system');
     } finally {
       setIsLoading(false);
+      setAbortController(null);
+    }
+  };
+
+  // Handle deleting a chat
+  const handleDeleteChat = async (chatId: string) => {
+    try {
+      // Delete the chat from the database
+      const success = await deleteChat(chatId);
+      
+      if (success) {
+        // If we're deleting the active chat, clear the UI
+        if (chatId === activeChatId) {
+          setMessages([]);
+          setActiveChatId(null);
+        }
+        
+        // Refresh the chat list
+        loadUserChats();
+      } else {
+        console.error('Failed to delete chat');
+      }
+    } catch (error) {
+      console.error('Error deleting chat:', error);
     }
   };
 
@@ -231,6 +548,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
         activeChatId={activeChatId}
         onSelectChat={handleSelectChat}
         onUpdateChatTitle={handleUpdateChatTitle}
+        onDeleteChat={handleDeleteChat}
         isMobileOpen={isMobileSidebarOpen}
         onMobileClose={() => setIsMobileSidebarOpen(false)}
       />
@@ -250,7 +568,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
           <h1 className="font-bold text-xl">Orchestrate</h1>
         </div>
 
-        <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent">
+        <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent" ref={chatContainerRef}>
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center px-4">
               <h1 className="text-2xl md:text-3xl font-semibold mb-8 text-center">How can I help you?</h1>
@@ -290,10 +608,10 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                     key={index}
                     className={`flex flex-col ${
                       message.role === 'user' ? 'items-end' : 'items-start'
-                    } animate-fade-in`}
+                    } animate-fade-in group`}
                   >
                     <div className="text-xs text-zinc-500 mb-1 px-1">
-                      {message.role === 'user' ? user.email : `AI (${formatModelName(selectedModel)})`}
+                      {message.role === 'user' ? user.email : `AI (${formatModelName(message.model || selectedModel)})`}
                     </div>
                     <div
                       className={
@@ -302,7 +620,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                           : 'chat-message-assistant'
                       }
                     >
-                      <div className="message-content">
+                      <div className="message-content relative group">
                         <ReactMarkdown
                           components={{
                             // Use proper spacing for single-line messages
@@ -311,6 +629,17 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                         >
                           {message.content}
                         </ReactMarkdown>
+                        
+                        {/* Delete button - visible only on hover */}
+                        {message.messageid && (
+                          <button
+                            onClick={() => handleDeleteMessage(message.messageid!)}
+                            className="absolute top-0 right-0 p-1.5 text-red-400 opacity-0 group-hover:opacity-100 hover:text-red-300 transition-opacity duration-200 bg-zinc-800 rounded-md"
+                            aria-label="Delete message"
+                          >
+                            🗑️
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -336,6 +665,18 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                   disabled={isLoading}
                 />
                 <div className="flex items-center pl-2">
+                  {isLoading && abortController && (
+                    <button
+                      type="button"
+                      onClick={() => abortController.abort()}
+                      className="p-2 rounded-md text-red-400 hover:text-red-300 transition-colors mr-1"
+                      aria-label="Stop generation"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clipRule="evenodd" />
+                      </svg>
+                    </button>
+                  )}
                   <div className="flex items-center border-l border-zinc-700/50 pl-2">
                     <button
                       type="submit"
@@ -359,61 +700,77 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
             </form>
             <div className="flex mt-2 justify-between items-center text-xs text-zinc-500">
               <div className="hidden sm:block">Press Enter to send</div>
-              <div className="relative flex justify-end w-full sm:w-auto" ref={dropdownRef}>
-                <button 
-                  onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
-                  className="hover:text-white cursor-pointer transition-colors ml-auto"
-                  aria-label="Select model"
-                >
-                  {selectedModel.split('/').pop() || 'AI Model'} ▼
-                </button>
-                {isModelDropdownOpen && (
-                  <div className="fixed sm:absolute bottom-16 sm:bottom-full right-3 sm:right-0 left-auto z-20 w-[calc(100%-24px)] sm:w-64 md:w-72 mb-0 sm:mb-2 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg overflow-hidden">
-                    <div className="p-2">
-                      <input
-                        type="text"
-                        value={modelSearchQuery}
-                        onChange={(e) => setModelSearchQuery(e.target.value)}
-                        placeholder="Search models"
-                        className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-md focus:outline-none focus:ring-1 focus:ring-purple-500"
-                      />
-                    </div>
-                    <div className="max-h-60 md:max-h-80 overflow-y-auto">
-                      {availableModels
-                        .filter((model) => 
-                          model.name.toLowerCase().includes(modelSearchQuery.toLowerCase()) ||
-                          model.id.toLowerCase().includes(modelSearchQuery.toLowerCase())
-                        )
-                        .map((model) => (
-                          <div
-                            key={model.id}
-                            className={`px-3 py-2 text-sm hover:bg-zinc-700 cursor-pointer flex items-center ${
-                              selectedModel === model.id ? 'bg-purple-900/40 font-medium' : ''
-                            }`}
-                            onClick={() => {
-                              setSelectedModel(model.id);
-                              setIsModelDropdownOpen(false);
-                            }}
-                          >
-                            <div className="mr-2">
-                              <div className="w-6 h-6 rounded-full flex items-center justify-center" 
-                                style={{
-                                  backgroundColor: getModelColor(model.id)
-                                }}
-                              >
-                                {model.id.split('/')[0]?.charAt(0)?.toUpperCase() || '?'}
+              <div className="flex items-center gap-3">
+                <div className="flex items-center">
+                  <label htmlFor="streamToggle" className="mr-2 cursor-pointer">
+                    {enableStreaming ? 'Streaming: On' : 'Streaming: Off'} 
+                  </label>
+                  <div className="relative inline-block w-10 align-middle select-none">
+                    <input
+                      id="streamToggle"
+                      type="checkbox"
+                      checked={enableStreaming}
+                      onChange={() => setEnableStreaming(!enableStreaming)}
+                      className="sr-only"
+                    />
+                    <div className={`block w-10 h-6 rounded-full ${enableStreaming ? 'bg-purple-600' : 'bg-zinc-700'} transition-colors duration-200`}></div>
+                    <div className={`absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform duration-200 ease-in-out ${enableStreaming ? 'transform translate-x-4' : ''}`}></div>
+                  </div>
+                </div>
+                <div className="relative flex justify-end" ref={dropdownRef}>
+                  <button 
+                    onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
+                    className="hover:text-white cursor-pointer transition-colors"
+                    aria-label="Select model"
+                  >
+                    {selectedModel.split('/').pop() || 'AI Model'} ▼
+                  </button>
+                  {isModelDropdownOpen && (
+                    <div className="fixed sm:absolute bottom-16 sm:bottom-full right-3 sm:right-0 left-auto z-20 w-[calc(100%-24px)] sm:w-64 md:w-72 mb-0 sm:mb-2 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg overflow-hidden">
+                      <div className="p-2">
+                        <input
+                          type="text"
+                          value={modelSearchQuery}
+                          onChange={(e) => setModelSearchQuery(e.target.value)}
+                          placeholder="Search models"
+                          className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-md focus:outline-none focus:ring-1 focus:ring-purple-500"
+                        />
+                      </div>
+                      <div className="max-h-60 md:max-h-80 overflow-y-auto">
+                        {availableModels
+                          .filter((model) => 
+                            model.name.toLowerCase().includes(modelSearchQuery.toLowerCase()) ||
+                            model.id.toLowerCase().includes(modelSearchQuery.toLowerCase())
+                          )
+                          .map((model) => (
+                            <div
+                              key={model.id}
+                              className={`px-3 py-2 text-sm hover:bg-zinc-700 cursor-pointer flex items-center ${
+                                selectedModel === model.id ? 'bg-purple-900/40 font-medium' : ''
+                              }`}
+                              onClick={() => {
+                                setSelectedModel(model.id);
+                                setIsModelDropdownOpen(false);
+                              }}
+                            >
+                              <div className="mr-2">
+                                <div className="w-6 h-6 rounded-full flex items-center justify-center" 
+                                  style={{
+                                    backgroundColor: getModelColor(model.id)
+                                  }}
+                                >
+                                  {model.id.split('/')[0]?.charAt(0)?.toUpperCase() || '?'}
+                                </div>
                               </div>
-                            </div>
-                            <div>
                               <div className="font-medium text-white">
                                 {model.name || formatModelName(model.id)}
                               </div>
                             </div>
-                          </div>
-                        ))}
+                          ))}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             </div>
           </div>

@@ -4,7 +4,37 @@ import { ChatMessage } from './openrouter';
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Configure Supabase client with persistent sessions
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    storageKey: 'orchestrate-chat-auth',
+    storage: {
+      getItem: (key) => {
+        if (typeof window !== 'undefined') {
+          return JSON.parse(localStorage.getItem(key) || 'null');
+        }
+        return null;
+      },
+      setItem: (key, value) => {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(key, JSON.stringify(value));
+        }
+      },
+      removeItem: (key) => {
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem(key);
+        }
+      },
+    },
+  },
+  // Global settings for storing cookies across the entire site
+  global: {
+    headers: {
+      'X-Client-Info': 'orchestrate-chat'
+    },
+  },
+});
 
 // Chat database functions
 export interface Chat {
@@ -14,8 +44,8 @@ export interface Chat {
 }
 
 export interface ChatMessageDB {
-  messageId?: string;
-  chatId: string;
+  messageid?: string;
+  chatid: string;
   message: string;
   source: string;
   created_at?: string;
@@ -56,6 +86,48 @@ export async function saveMessage(
   } catch (error) {
     console.error('Error saving message:', error);
     return null;
+  }
+}
+
+// Save a message to the database with streaming support
+export async function saveStreamingMessage(
+  chatId: string,
+  initialContent: string,
+  source: string
+): Promise<string | null> {
+  try {
+    // Create the initial empty message
+    const { data, error } = await supabase
+      .from('chats')
+      .insert([{ chatid: chatId, message: initialContent, source }])
+      .select('messageid');
+    
+    if (error) throw error;
+    
+    return data && data[0] ? data[0].messageid : null;
+  } catch (error) {
+    console.error('Error saving streaming message:', error);
+    return null;
+  }
+}
+
+// Update an existing streaming message with additional content
+export async function updateStreamingMessage(
+  messageId: string,
+  content: string
+): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from('chats')
+      .update({ message: content })
+      .eq('messageid', messageId);
+    
+    if (error) throw error;
+    
+    return true;
+  } catch (error) {
+    console.error('Error updating streaming message:', error);
+    return false;
   }
 }
 
@@ -102,7 +174,8 @@ export async function getUserChats(): Promise<Chat[]> {
 export function dbMessagesToChatMessages(messages: ChatMessageDB[]): ChatMessage[] {
   return messages.map(msg => ({
     role: msg.source === 'user' ? 'user' : 'assistant' as 'user' | 'assistant',
-    content: msg.message
+    content: msg.message,
+    model: msg.source !== 'user' ? msg.source : undefined
   }));
 }
 
@@ -119,6 +192,55 @@ export async function updateChatTitle(chatId: string, title: string): Promise<bo
     return true;
   } catch (error) {
     console.error('Error updating chat title:', error);
+    return false;
+  }
+}
+
+// Delete a chat and all its messages
+export async function deleteChat(chatId: string): Promise<boolean> {
+  try {
+    // First delete all chat messages
+    const { error: messagesError } = await supabase
+      .from('chats')
+      .delete()
+      .eq('chatid', chatId);
+    
+    if (messagesError) throw messagesError;
+    
+    // Then delete the chat metadata
+    const { error: metaError } = await supabase
+      .from('chats_meta')
+      .delete()
+      .eq('chatid', chatId);
+    
+    if (metaError) throw metaError;
+    
+    return true;
+  } catch (error) {
+    console.error('Error deleting chat:', error);
+    return false;
+  }
+}
+
+// Delete a single message
+export async function deleteMessage(messageId: string): Promise<boolean> {
+  // Don't attempt to delete if messageId is undefined or empty
+  if (!messageId || messageId === 'undefined') {
+    console.error('Invalid message ID for deletion');
+    return false;
+  }
+
+  try {
+    const { error } = await supabase
+      .from('chats')
+      .delete()
+      .eq('messageid', messageId);
+    
+    if (error) throw error;
+    
+    return true;
+  } catch (error) {
+    console.error('Error deleting message:', error);
     return false;
   }
 }
