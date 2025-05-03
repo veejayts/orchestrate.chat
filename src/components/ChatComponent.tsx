@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ChatMessage, getChatCompletion } from '@/lib/openrouter';
+import { createChat, saveMessage, getChatMessages, getUserChats, dbMessagesToChatMessages, Chat } from '@/lib/supabase';
 import Sidebar from './Sidebar';
 
 // Sample suggestion questions
@@ -21,8 +22,24 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [userChats, setUserChats] = useState<Chat[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Load user chats
+  useEffect(() => {
+    if (userId) {
+      loadUserChats();
+    }
+  }, [userId]);
+
+  // Load messages for active chat
+  useEffect(() => {
+    if (activeChatId) {
+      loadChatMessages(activeChatId);
+    }
+  }, [activeChatId]);
 
   // Scroll to bottom of chat when messages change
   useEffect(() => {
@@ -37,17 +54,44 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     }
   }, [input]);
 
+  const loadUserChats = async () => {
+    const chats = await getUserChats();
+    setUserChats(chats);
+  };
+
+  const loadChatMessages = async (chatId: string) => {
+    const chatMessages = await getChatMessages(chatId);
+    setMessages(dbMessagesToChatMessages(chatMessages));
+  };
+
   const handleSubmit = async (e: React.FormEvent | null, submittedText: string = input) => {
     if (e) e.preventDefault();
     
     const messageText = submittedText.trim();
     if (!messageText || isLoading) return;
 
+    // Create a new chat if one doesn't exist
+    let currentChatId = activeChatId;
+    if (!currentChatId) {
+      const chatId = await createChat();
+      if (!chatId) {
+        console.error('Failed to create a new chat');
+        return;
+      }
+      currentChatId = chatId;
+      setActiveChatId(chatId);
+      // Add the new chat to the user's chats
+      loadUserChats();
+    }
+
     // Add user message to chat
     const userMessage: ChatMessage = { role: 'user', content: messageText };
     setMessages((prev) => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
+
+    // Save user message to database
+    await saveMessage(currentChatId, messageText, 'user');
 
     try {
       // Prepare conversation history for API call
@@ -59,13 +103,17 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
       if (response.choices && response.choices.length > 0) {
         const assistantMessage = response.choices[0].message;
         setMessages((prev) => [...prev, assistantMessage]);
+        
+        // Save AI response to database with the correct model name
+        await saveMessage(currentChatId, assistantMessage.content, response.model);
       }
     } catch (error) {
       console.error('Error getting chat completion:', error);
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: 'Sorry, there was an error processing your request.' },
-      ]);
+      const errorMessage = { role: 'assistant' as const, content: 'Sorry, there was an error processing your request.' };
+      setMessages((prev) => [...prev, errorMessage]);
+      
+      // Save error message to database
+      await saveMessage(currentChatId, errorMessage.content, 'system');
     } finally {
       setIsLoading(false);
     }
@@ -84,13 +132,25 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     }
   };
 
-  const handleNewChat = () => {
+  const handleNewChat = async () => {
     setMessages([]);
+    setActiveChatId(null);
+  };
+
+  const handleSelectChat = (chatId: string) => {
+    setActiveChatId(chatId);
   };
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <Sidebar onNewChat={handleNewChat} user={user} onSignOut={onSignOut} />
+      <Sidebar 
+        onNewChat={handleNewChat} 
+        user={user} 
+        onSignOut={onSignOut}
+        chats={userChats}
+        activeChatId={activeChatId}
+        onSelectChat={handleSelectChat}
+      />
       
       <main className="flex-1 flex flex-col h-screen">
         <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent">

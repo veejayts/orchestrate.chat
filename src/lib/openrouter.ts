@@ -5,6 +5,7 @@ export interface ChatMessage {
 
 export interface ChatCompletionResponse {
   id: string;
+  model: string;
   choices: {
     message: ChatMessage;
     finish_reason: string;
