@@ -25,6 +25,33 @@ import {
 } from '@/lib/supabase';
 import Sidebar from './Sidebar';
 
+// OpenRouter import types
+interface OpenRouterExport {
+  version: string;
+  characters: {
+    [key: string]: {
+      model: string;
+      modelInfo: any;
+      id: string;
+      updatedAt: string;
+      description: string;
+    }
+  };
+  messages: {
+    [key: string]: {
+      characterId: string;
+      content: string;
+      id: string;
+      updatedAt: string;
+      isGenerating?: boolean;
+      metadata?: any;
+      citations?: any[];
+      files?: any[];
+      attachments?: any[];
+    }
+  }
+}
+
 // Sample suggestion questions
 const SUGGESTIONS = [
   "How does AI work?",
@@ -55,9 +82,12 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
   const [abortController, setAbortController] = useState<AbortController | null>(null);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [isAddingMessage, setIsAddingMessage] = useState<boolean>(false); // Add a state to track when we're adding a new message
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingContent, setEditingContent] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const editTextareaRef = useRef<HTMLTextAreaElement>(null);
   // Add a ref to track scroll position
   const scrollPositionRef = useRef<number>(0);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -206,6 +236,96 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     }));
     
     setMessages(enhancedMessages);
+  };
+
+  // Function to import OpenRouter conversations
+  const importOpenRouterConversation = async (data: OpenRouterExport) => {
+    try {
+      // Validate the format
+      if (!data.version || !data.messages || !data.characters) {
+        throw new Error('Invalid OpenRouter conversation format');
+      }
+
+      // Get the messages in chronological order
+      const messagesArray = Object.values(data.messages);
+      
+      // Sort by updatedAt timestamp
+      messagesArray.sort((a, b) => {
+        return new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
+      });
+
+      // Create a new chat
+      const chatId = await createChat('Imported Conversation');
+      if (!chatId) {
+        throw new Error('Failed to create a new chat');
+      }
+
+      // Get the title from the first message (truncate if needed)
+      if (messagesArray.length > 0) {
+        const firstMessage = messagesArray[0];
+        const chatTitle = firstMessage.content.length > 25
+          ? firstMessage.content.substring(0, 25) + '...'
+          : firstMessage.content;
+        
+        await updateChatTitle(chatId, chatTitle);
+      }
+
+      // Process and save each message
+      for (const message of messagesArray) {
+        // Determine if it's a user or assistant message
+        const isUserMessage = message.characterId === 'USER';
+        
+        // Get the model information for assistant messages
+        let modelName = 'assistant';
+        if (!isUserMessage && message.characterId && data.characters[message.characterId]) {
+          modelName = data.characters[message.characterId].model || 'assistant';
+        }
+
+        // Save the message to the database
+        await saveMessage(
+          chatId,
+          message.content,
+          isUserMessage ? 'user' : modelName
+        );
+      }
+
+      // Refresh chat list and switch to the new chat
+      await loadUserChats();
+      setActiveChatId(chatId);
+      
+      return true;
+    } catch (error) {
+      console.error('Error importing conversation:', error);
+      return false;
+    }
+  };
+
+  // Handle file upload
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const content = e.target?.result as string;
+        const data = JSON.parse(content) as OpenRouterExport;
+        
+        const success = await importOpenRouterConversation(data);
+        if (success) {
+          alert('Conversation imported successfully!');
+        } else {
+          alert('Failed to import conversation. Check console for details.');
+        }
+      } catch (error) {
+        console.error('Error parsing file:', error);
+        alert('Failed to parse file. Please make sure it\'s a valid JSON file.');
+      }
+    };
+    reader.readAsText(file);
+    
+    // Reset the input value so the same file can be selected again
+    event.target.value = '';
   };
 
   // Handle streaming submission
@@ -467,6 +587,218 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     }
   };
 
+  // Handle retry message - regenerate AI response for a user message
+  const handleRetryMessage = async (index: number) => {
+    // Don't do anything if we're already loading
+    if (isLoading) return;
+    
+    // Make sure this is a valid user message with a next message
+    if (index < 0 || index >= messages.length - 1 || messages[index].role !== 'user') {
+      return;
+    }
+    
+    // Get the user message that we want to retry
+    const userMessage = messages[index];
+    
+    // Get the current assistant message (the one that follows)
+    const assistantMessage = messages[index + 1];
+    
+    // Make sure we have an active chat
+    if (!activeChatId) {
+      console.error('No active chat for retry');
+      return;
+    }
+    
+    // Set loading state
+    setIsLoading(true);
+    
+    // If the assistant message has an ID, we'll update it instead of creating a new one
+    const messageId = assistantMessage.messageid;
+    
+    try {
+      // Format conversation history (including all messages up to the user message)
+      const conversationHistory = messages.slice(0, index + 1);
+      
+      // Update the UI to show that the message is being regenerated
+      setMessages((prevMessages) => {
+        const newMessages = [...prevMessages];
+        
+        // Update the assistant message to show loading state
+        if (index + 1 < newMessages.length && newMessages[index + 1].role === 'assistant') {
+          newMessages[index + 1] = {
+            ...newMessages[index + 1],
+            content: 'Regenerating...',
+          };
+        }
+        
+        return newMessages;
+      });
+      
+      if (enableStreaming) {
+        // For streaming, we'll use the streaming approach
+        setStreamingMessageId(messageId || null);
+        
+        // Accumulated content for database updates
+        let accumulatedContent = '';
+        
+        // Create a new AbortController for this request
+        const controller = new AbortController();
+        setAbortController(controller);
+        
+        // Handle streaming chunks
+        await getChatCompletionStream(
+          conversationHistory,
+          selectedModel,
+          (chunk) => {
+            // Update the message content as chunks arrive
+            const contentDelta = chunk.choices[0].delta.content || '';
+            
+            // Only add content if there's something to add
+            if (contentDelta) {
+              accumulatedContent += contentDelta;
+              
+              // Update UI
+              setMessages((prevMessages) => {
+                const newMessages = [...prevMessages];
+                // We're specifically updating the message at index + 1
+                if (index + 1 < newMessages.length && newMessages[index + 1].role === 'assistant') {
+                  newMessages[index + 1] = {
+                    ...newMessages[index + 1],
+                    content: accumulatedContent,
+                    model: chunk.model,
+                    messageid: messageId || undefined // Keep the message ID
+                  };
+                }
+                
+                return newMessages;
+              });
+              
+              // Periodically update the message in the database if we have a messageId
+              if (messageId && accumulatedContent.length % 100 === 0) {
+                updateStreamingMessage(messageId, accumulatedContent).catch(console.error);
+              }
+            }
+          },
+          () => {
+            // When streaming is complete, save the final message to the database
+            if (messageId && accumulatedContent) {
+              updateStreamingMessage(messageId, accumulatedContent).catch(console.error);
+            }
+            setIsLoading(false);
+            setStreamingMessageId(null);
+            setAbortController(null);
+          },
+          (error) => {
+            console.error('Error during streaming retry:', error);
+            
+            // Check if this was an abort error (user canceled the request)
+            const wasAborted = error.name === 'AbortError' || error.message === 'Request aborted';
+            
+            // Handle error in UI
+            setMessages((prevMessages) => {
+              const newMessages = [...prevMessages];
+              
+              // Update the specific assistant message with an error
+              if (index + 1 < newMessages.length && newMessages[index + 1].role === 'assistant') {
+                if (accumulatedContent) {
+                  // Keep what we have so far and add error message if not aborted
+                  newMessages[index + 1].content = accumulatedContent + 
+                    (wasAborted ? '\n\n_Generation stopped._' : '\n\n_Error: Message streaming was interrupted._');
+                } else {
+                  // Replace loading message with error or abort message
+                  newMessages[index + 1].content = wasAborted 
+                    ? 'Generation stopped.'
+                    : 'Sorry, there was an error processing your request.';
+                }
+              }
+              
+              return newMessages;
+            });
+            
+            // Save error state to database if we have a messageId
+            if (messageId) {
+              const errorMessage = accumulatedContent 
+                ? accumulatedContent + (wasAborted 
+                    ? '\n\n_Generation stopped._' 
+                    : '\n\n_Error: Message streaming was interrupted._')
+                : wasAborted 
+                  ? 'Generation stopped.'
+                  : 'Sorry, there was an error processing your request.';
+                  
+              updateStreamingMessage(messageId, errorMessage).catch(console.error);
+            }
+            
+            setIsLoading(false);
+            setStreamingMessageId(null);
+            setAbortController(null);
+          },
+          controller.signal
+        );
+      } else {
+        // Non-streaming approach
+        const controller = new AbortController();
+        setAbortController(controller);
+        
+        // Get AI response using the selected model
+        const response = await getChatCompletion(conversationHistory, selectedModel, controller.signal);
+        
+        if (response.choices && response.choices.length > 0) {
+          const newAssistantMessage = response.choices[0].message;
+          
+          // Update the message in the UI
+          setMessages((prevMessages) => {
+            const newMessages = [...prevMessages];
+            if (index + 1 < newMessages.length && newMessages[index + 1].role === 'assistant') {
+              newMessages[index + 1] = {
+                ...newMessages[index + 1],
+                content: newAssistantMessage.content,
+                model: response.model,
+              };
+            }
+            return newMessages;
+          });
+          
+          // Update the message in the database
+          if (messageId) {
+            await updateStreamingMessage(messageId, newAssistantMessage.content);
+          } else {
+            // If for some reason we don't have a message ID, create a new one
+            await saveMessage(activeChatId, newAssistantMessage.content, response.model);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error retrying message:', error);
+      
+      // Check if this was an abort error
+      const wasAborted = error instanceof Error && 
+        (error.name === 'AbortError' || error.message === 'Request aborted');
+      
+      // Update the message in the UI with an error
+      setMessages((prevMessages) => {
+        const newMessages = [...prevMessages];
+        if (index + 1 < newMessages.length && newMessages[index + 1].role === 'assistant') {
+          newMessages[index + 1] = {
+            ...newMessages[index + 1],
+            content: wasAborted ? 'Generation stopped.' : 'Sorry, there was an error processing your request.',
+          };
+        }
+        return newMessages;
+      });
+      
+      // Update the message in the database with an error
+      if (messageId) {
+        const errorContent = wasAborted 
+          ? 'Generation stopped.' 
+          : 'Sorry, there was an error processing your request.';
+        await updateStreamingMessage(messageId, errorContent);
+      }
+    } finally {
+      setIsLoading(false);
+      setAbortController(null);
+    }
+  };
+
   // Handle deleting a chat
   const handleDeleteChat = async (chatId: string) => {
     try {
@@ -616,29 +948,106 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                     <div
                       className={
                         message.role === 'user'
-                          ? 'chat-message-user'
-                          : 'chat-message-assistant'
+                          ? 'chat-message-user relative group'
+                          : 'chat-message-assistant relative group'
                       }
                     >
-                      <div className="message-content relative group">
-                        <ReactMarkdown
-                          components={{
-                            // Use proper spacing for single-line messages
-                            p: ({node, ...props}) => <p style={{marginBottom: '0'}} {...props} />
-                          }}
-                        >
-                          {message.content}
-                        </ReactMarkdown>
-                        
-                        {/* Delete button - visible only on hover */}
-                        {message.messageid && (
-                          <button
-                            onClick={() => handleDeleteMessage(message.messageid!)}
-                            className="absolute top-0 right-0 p-1.5 text-red-400 opacity-0 group-hover:opacity-100 hover:text-red-300 transition-opacity duration-200 bg-zinc-800 rounded-md"
-                            aria-label="Delete message"
+                      <div className="message-content">
+                        {editingMessageId === message.messageid ? (
+                          <div className="edit-mode w-full">
+                            <textarea
+                              ref={editTextareaRef}
+                              value={editingContent}
+                              onChange={(e) => setEditingContent(e.target.value)}
+                              className="w-full bg-zinc-900 text-white p-2 rounded border border-zinc-700 min-h-[120px] text-base resize-vertical"
+                              autoFocus
+                              style={{ 
+                                minWidth: "300px",
+                                height: "300px",
+                              }}
+                            />
+                            <div className="flex justify-end mt-2 space-x-2">
+                              <button
+                                onClick={() => {
+                                  setEditingMessageId(null);
+                                  setEditingContent('');
+                                }}
+                                className="px-3 py-1 text-xs bg-zinc-700 hover:bg-zinc-600 rounded-md transition-colors"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  if (message.messageid && editingContent.trim()) {
+                                    // Save the edited message to the database
+                                    await updateStreamingMessage(message.messageid, editingContent.trim());
+                                    
+                                    // Update the message in the UI
+                                    setMessages(messages.map(m => 
+                                      m.messageid === message.messageid 
+                                        ? { ...m, content: editingContent.trim() } 
+                                        : m
+                                    ));
+                                    
+                                    // Exit edit mode
+                                    setEditingMessageId(null);
+                                    setEditingContent('');
+                                  }
+                                }}
+                                className="px-3 py-1 text-xs bg-purple-700 hover:bg-purple-600 rounded-md transition-colors"
+                              >
+                                Save
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <ReactMarkdown
+                            components={{
+                              // Use proper spacing for single-line messages
+                              p: ({node, ...props}) => <p style={{marginBottom: '0'}} {...props} />
+                            }}
                           >
-                            🗑️
-                          </button>
+                            {message.content}
+                          </ReactMarkdown>
+                        )}
+                        
+                        {/* Message action buttons - visible only on hover */}
+                        {message.messageid && !editingMessageId && (
+                          <div className="absolute top-0 right-0 p-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex space-x-1 bg-zinc-800 rounded-md z-10">
+                            {message.role === 'user' && (
+                              <button
+                                onClick={() => {
+                                  setEditingMessageId(message.messageid!);
+                                  setEditingContent(message.content);
+                                  setTimeout(() => {
+                                    if (editTextareaRef.current) {
+                                      editTextareaRef.current.focus();
+                                    }
+                                  }, 10);
+                                }}
+                                className="p-1 text-blue-400 hover:text-blue-300 transition-colors"
+                                aria-label="Edit message"
+                              >
+                                ✏️
+                              </button>
+                            )}
+                            {message.role === 'user' && (
+                              <button
+                                onClick={() => handleRetryMessage(index)}
+                                className="p-1 text-green-400 hover:text-green-300 transition-colors"
+                                aria-label="Retry message"
+                              >
+                                🔄
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleDeleteMessage(message.messageid!)}
+                              className="p-1 text-red-400 hover:text-red-300 transition-colors"
+                              aria-label="Delete message"
+                            >
+                              🗑️
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -770,6 +1179,18 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                       </div>
                     </div>
                   )}
+                </div>
+                <div className="relative flex justify-end">
+                  <label htmlFor="fileUpload" className="cursor-pointer hover:text-white transition-colors">
+                    Import Conversation
+                  </label>
+                  <input
+                    id="fileUpload"
+                    type="file"
+                    accept=".json"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
                 </div>
               </div>
             </div>
