@@ -236,6 +236,17 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     }));
     
     setMessages(enhancedMessages);
+
+    // Find the most recent assistant message to set the default model
+    const assistantMessages = chatMessagesDb.filter(msg => msg.source !== 'user');
+    if (assistantMessages.length > 0) {
+      // Get the most recent assistant message (last one in the array since they're ordered by created_at)
+      const mostRecentAssistantMsg = assistantMessages[assistantMessages.length - 1];
+      // Set the selected model to the one used in the most recent assistant message
+      if (mostRecentAssistantMsg.source) {
+        setSelectedModel(mostRecentAssistantMsg.source);
+      }
+    }
   };
 
   // Function to import OpenRouter conversations
