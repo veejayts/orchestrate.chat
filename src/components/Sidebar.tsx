@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import ProfilePopup from './ProfilePopup';
 import { Chat } from '@/lib/supabase';
 
@@ -10,6 +10,8 @@ interface SidebarProps {
   activeChatId: string | null;
   onSelectChat: (chatId: string) => void;
   onUpdateChatTitle?: (chatId: string, newTitle: string) => Promise<void>;
+  isMobileOpen?: boolean;
+  onMobileClose?: () => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ 
@@ -19,7 +21,9 @@ const Sidebar: React.FC<SidebarProps> = ({
   chats = [], 
   activeChatId,
   onSelectChat,
-  onUpdateChatTitle
+  onUpdateChatTitle,
+  isMobileOpen = false,
+  onMobileClose
 }) => {
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState<string>('');
@@ -50,6 +54,14 @@ const Sidebar: React.FC<SidebarProps> = ({
       groupedChats.older.push(chat);
     }
   });
+
+  // Close sidebar on mobile when chat is selected
+  const handleSelectChat = (chatId: string) => {
+    onSelectChat(chatId);
+    if (window.innerWidth < 768 && onMobileClose) {
+      onMobileClose();
+    }
+  };
 
   const handleDoubleClick = (chat: Chat) => {
     if (!onUpdateChatTitle) return;
@@ -100,7 +112,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         className={`px-2 py-2 text-sm rounded-lg hover:bg-zinc-800/50 cursor-pointer ${
           activeChatId === chat.chatId ? 'bg-zinc-800' : ''
         }`}
-        onClick={() => onSelectChat(chat.chatId)}
+        onClick={() => handleSelectChat(chat.chatId)}
         onDoubleClick={() => handleDoubleClick(chat)}
       >
         {chat.title}
@@ -108,109 +120,132 @@ const Sidebar: React.FC<SidebarProps> = ({
     );
   };
 
+  // Add CSS classes depending on whether sidebar is visible on mobile
+  const sidebarClasses = `sidebar h-screen w-60 md:w-60 flex flex-col border-r border-zinc-800 
+    ${isMobileOpen ? 'fixed md:relative z-50 w-3/4' : 'hidden md:flex'}`;
+
   return (
-    <div className="sidebar h-screen w-60 flex flex-col border-r border-zinc-800">
-      <div className="flex items-center justify-center h-14 px-4 border-b border-zinc-800">
-        <h1 className="font-bold text-xl">Orchestrate</h1>
-      </div>
-      
-      <div className="p-3">
-        <button 
-          onClick={onNewChat}
-          className="new-chat-button w-full mb-4"
-          style={{
-            backgroundColor: 'rgba(88, 28, 135, 0.6)', // bg-purple-900/60
-            color: 'white',
-            fontWeight: '500',
-            padding: '0.75rem 1rem',
-            borderRadius: '0.375rem',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            border: '1px solid rgba(126, 34, 206, 0.5)', // border-purple-700/50
-            transition: 'background-color 200ms'
-          }}
-        >
-          New Chat
-        </button>
-      </div>
+    <>
+      {/* Overlay for mobile when sidebar is open */}
+      {isMobileOpen && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 z-40 md:hidden" 
+          onClick={onMobileClose}
+        />
+      )}
 
-      <div className="flex-1 overflow-y-auto px-2 py-2">
-        {/* Today's chats */}
-        {groupedChats.today.length > 0 && (
-          <div className="mb-4">
-            <div className="px-2 py-1 text-xs font-medium text-zinc-500">
-              Today
-            </div>
-            <div className="space-y-1 mt-1">
-              {groupedChats.today.map(chat => (
-                <div key={chat.chatId}>
-                  {renderChatItem(chat)}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+      <div className={sidebarClasses}>
+        <div className="flex items-center justify-between h-14 px-4 border-b border-zinc-800">
+          <h1 className="font-bold text-xl">Orchestrate</h1>
+          <button 
+            onClick={onMobileClose}
+            className="md:hidden text-gray-400 hover:text-white"
+            aria-label="Close sidebar"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+            </svg>
+          </button>
+        </div>
+        
+        <div className="p-3">
+          <button 
+            onClick={onNewChat}
+            className="new-chat-button w-full mb-4"
+            style={{
+              backgroundColor: 'rgba(88, 28, 135, 0.6)', // bg-purple-900/60
+              color: 'white',
+              fontWeight: '500',
+              padding: '0.75rem 1rem',
+              borderRadius: '0.375rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              border: '1px solid rgba(126, 34, 206, 0.5)', // border-purple-700/50
+              transition: 'background-color 200ms'
+            }}
+          >
+            New Chat
+          </button>
+        </div>
 
-        {/* Yesterday's chats */}
-        {groupedChats.yesterday.length > 0 && (
-          <div className="mb-4">
-            <div className="px-2 py-1 text-xs font-medium text-zinc-500">
-              Yesterday
-            </div>
-            <div className="space-y-1 mt-1">
-              {groupedChats.yesterday.map(chat => (
-                <div key={chat.chatId}>
-                  {renderChatItem(chat)}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Older chats */}
-        {groupedChats.older.length > 0 && (
-          <div className="mb-4">
-            <div className="px-2 py-1 text-xs font-medium text-zinc-500">
-              Older
-            </div>
-            <div className="space-y-1 mt-1">
-              {groupedChats.older.map(chat => (
-                <div key={chat.chatId}>
-                  {renderChatItem(chat)}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Show default items if no chats */}
-        {chats.length === 0 && (
-          <div className="mb-4">
-            <div className="px-2 py-1 text-xs font-medium text-zinc-500">
-              Older
-            </div>
-            <div className="space-y-1 mt-1">
-              <div className="px-2 py-2 text-sm rounded-lg hover:bg-zinc-800/50 cursor-pointer">
-                Welcome to Orchestrate Chat
+        <div className="flex-1 overflow-y-auto px-2 py-2">
+          {/* Today's chats */}
+          {groupedChats.today.length > 0 && (
+            <div className="mb-4">
+              <div className="px-2 py-1 text-xs font-medium text-zinc-500">
+                Today
               </div>
-              <div className="px-2 py-2 text-sm rounded-lg hover:bg-zinc-800/50 cursor-pointer">
-                How to use AI effectively
-              </div>
-              <div className="px-2 py-2 text-sm rounded-lg hover:bg-zinc-800/50 cursor-pointer">
-                FAQ
+              <div className="space-y-1 mt-1">
+                {groupedChats.today.map(chat => (
+                  <div key={chat.chatId}>
+                    {renderChatItem(chat)}
+                  </div>
+                ))}
               </div>
             </div>
-          </div>
-        )}
-      </div>
+          )}
 
-      <div className="p-3 border-t border-zinc-800">
-        <div className="flex items-center justify-between">
-          <ProfilePopup user={user} onSignOut={onSignOut} />
+          {/* Yesterday's chats */}
+          {groupedChats.yesterday.length > 0 && (
+            <div className="mb-4">
+              <div className="px-2 py-1 text-xs font-medium text-zinc-500">
+                Yesterday
+              </div>
+              <div className="space-y-1 mt-1">
+                {groupedChats.yesterday.map(chat => (
+                  <div key={chat.chatId}>
+                    {renderChatItem(chat)}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Older chats */}
+          {groupedChats.older.length > 0 && (
+            <div className="mb-4">
+              <div className="px-2 py-1 text-xs font-medium text-zinc-500">
+                Older
+              </div>
+              <div className="space-y-1 mt-1">
+                {groupedChats.older.map(chat => (
+                  <div key={chat.chatId}>
+                    {renderChatItem(chat)}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Show default items if no chats */}
+          {chats.length === 0 && (
+            <div className="mb-4">
+              <div className="px-2 py-1 text-xs font-medium text-zinc-500">
+                Older
+              </div>
+              <div className="space-y-1 mt-1">
+                <div className="px-2 py-2 text-sm rounded-lg hover:bg-zinc-800/50 cursor-pointer">
+                  Welcome to Orchestrate Chat
+                </div>
+                <div className="px-2 py-2 text-sm rounded-lg hover:bg-zinc-800/50 cursor-pointer">
+                  How to use AI effectively
+                </div>
+                <div className="px-2 py-2 text-sm rounded-lg hover:bg-zinc-800/50 cursor-pointer">
+                  FAQ
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="p-3 border-t border-zinc-800">
+          <div className="flex items-center justify-between">
+            <ProfilePopup user={user} onSignOut={onSignOut} />
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 };
 

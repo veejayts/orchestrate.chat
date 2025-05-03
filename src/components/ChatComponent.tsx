@@ -28,6 +28,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
   const [availableModels, setAvailableModels] = useState<OpenRouterModel[]>([]);
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState<boolean>(false);
   const [modelSearchQuery, setModelSearchQuery] = useState<string>('');
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -188,6 +189,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
   const handleNewChat = async () => {
     setMessages([]);
     setActiveChatId(null);
+    setIsMobileSidebarOpen(false);
   };
 
   const handleSelectChat = (chatId: string) => {
@@ -215,6 +217,10 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     return modelId.split('/').pop() || 'Unknown Model';
   };
 
+  const toggleMobileSidebar = () => {
+    setIsMobileSidebarOpen(!isMobileSidebarOpen);
+  };
+
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar 
@@ -225,15 +231,31 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
         activeChatId={activeChatId}
         onSelectChat={handleSelectChat}
         onUpdateChatTitle={handleUpdateChatTitle}
+        isMobileOpen={isMobileSidebarOpen}
+        onMobileClose={() => setIsMobileSidebarOpen(false)}
       />
       
       <main className="flex-1 flex flex-col h-screen">
+        {/* Mobile header with menu button */}
+        <div className="md:hidden flex items-center h-14 px-4 border-b border-zinc-800">
+          <button 
+            onClick={toggleMobileSidebar}
+            className="text-gray-400 hover:text-white mr-4"
+            aria-label="Open sidebar"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
+          <h1 className="font-bold text-xl">Orchestrate</h1>
+        </div>
+
         <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent">
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center px-4">
-              <h1 className="text-3xl font-semibold mb-8">How can I help you?</h1>
+              <h1 className="text-2xl md:text-3xl font-semibold mb-8 text-center">How can I help you?</h1>
               
-              <div className="grid grid-cols-2 gap-3 max-w-2xl w-full mb-8">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl w-full mb-8">
                 <button className="suggestion-button flex items-center justify-center gap-2">
                   <span className="text-purple-400">✨</span>Create
                 </button>
@@ -248,7 +270,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                 </button>
               </div>
               
-              <div className="space-y-3 max-w-2xl w-full">
+              <div className="space-y-3 max-w-2xl w-full px-2">
                 {SUGGESTIONS.map((suggestion, index) => (
                   <button 
                     key={index}
@@ -261,7 +283,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
               </div>
             </div>
           ) : (
-            <div className="max-w-3xl mx-auto w-full py-8 px-4">
+            <div className="max-w-3xl mx-auto w-full py-4 md:py-8 px-3 md:px-4">
               <div className="flex flex-col space-y-4">
                 {messages.map((message, index) => (
                   <div
@@ -292,7 +314,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
           )}
         </div>
 
-        <div className="p-4 md:p-6">
+        <div className="p-3 md:p-4 lg:p-6">
           <div className="max-w-3xl mx-auto">
             <form onSubmit={(e) => handleSubmit(e)} className="chat-input-container">
               <div className="flex items-end">
@@ -329,7 +351,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
               </div>
             </form>
             <div className="flex mt-2 justify-between items-center text-xs text-zinc-500">
-              <div>Press Enter to send</div>
+              <div className="hidden sm:block">Press Enter to send</div>
               <div className="relative" ref={dropdownRef}>
                 <button 
                   onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
@@ -339,7 +361,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                   {selectedModel.split('/').pop() || 'AI Model'} ▼
                 </button>
                 {isModelDropdownOpen && (
-                  <div className="absolute bottom-full right-0 z-10 w-72 mb-2 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg overflow-hidden">
+                  <div className="absolute bottom-full right-0 z-10 w-64 md:w-72 mb-2 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg overflow-hidden">
                     <div className="p-2">
                       <input
                         type="text"
@@ -349,7 +371,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                         className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-md focus:outline-none focus:ring-1 focus:ring-purple-500"
                       />
                     </div>
-                    <div className="max-h-80 overflow-y-auto">
+                    <div className="max-h-60 md:max-h-80 overflow-y-auto">
                       {availableModels
                         .filter((model) => 
                           model.name.toLowerCase().includes(modelSearchQuery.toLowerCase()) ||
