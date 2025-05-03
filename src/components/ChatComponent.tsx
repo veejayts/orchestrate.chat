@@ -398,7 +398,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                               </div>
                             </div>
                             <div>
-                              <div className="font-medium">
+                              <div className="font-medium text-white">
                                 {model.name || formatModelName(model.id)}
                               </div>
                             </div>

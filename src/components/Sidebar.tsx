@@ -217,26 +217,6 @@ const Sidebar: React.FC<SidebarProps> = ({
               </div>
             </div>
           )}
-
-          {/* Show default items if no chats */}
-          {chats.length === 0 && (
-            <div className="mb-4">
-              <div className="px-2 py-1 text-xs font-medium text-zinc-500">
-                Older
-              </div>
-              <div className="space-y-1 mt-1">
-                <div className="px-2 py-2 text-sm rounded-lg hover:bg-zinc-800/50 cursor-pointer">
-                  Welcome to Orchestrate Chat
-                </div>
-                <div className="px-2 py-2 text-sm rounded-lg hover:bg-zinc-800/50 cursor-pointer">
-                  How to use AI effectively
-                </div>
-                <div className="px-2 py-2 text-sm rounded-lg hover:bg-zinc-800/50 cursor-pointer">
-                  FAQ
-                </div>
-              </div>
-            </div>
-          )}
         </div>
 
         <div className="p-3 border-t border-zinc-800">

@@ -32,7 +32,7 @@ const LoginForm: React.FC<AuthFormProps> = ({ setAuthView }) => {
 
   return (
     <div className="max-w-md w-full mx-auto p-6 bg-white rounded-lg shadow-md">
-      <h2 className="text-2xl font-bold text-center mb-6">Login to Orchestrate Chat</h2>
+      <h2 className="text-2xl font-bold text-center mb-6 text-black">Login to Orchestrate Chat</h2>
       
       {error && (
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
@@ -48,7 +48,7 @@ const LoginForm: React.FC<AuthFormProps> = ({ setAuthView }) => {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
-            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary"
+            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary text-black"
           />
         </div>
         
@@ -59,7 +59,7 @@ const LoginForm: React.FC<AuthFormProps> = ({ setAuthView }) => {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary"
+            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary text-black"
           />
         </div>
         
