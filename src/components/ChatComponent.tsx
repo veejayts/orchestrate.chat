@@ -240,7 +240,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
         <div className="md:hidden flex items-center h-14 px-4 border-b border-zinc-800">
           <button 
             onClick={toggleMobileSidebar}
-            className="text-gray-400 hover:text-white mr-4"
+            className="text-gray-400 hover:text-white mr-4 transition-colors duration-200"
             aria-label="Open sidebar"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -303,7 +303,14 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                       }
                     >
                       <div className="message-content">
-                        <ReactMarkdown>{message.content}</ReactMarkdown>
+                        <ReactMarkdown
+                          components={{
+                            // Use proper spacing for single-line messages
+                            p: ({node, ...props}) => <p style={{marginBottom: '0'}} {...props} />
+                          }}
+                        >
+                          {message.content}
+                        </ReactMarkdown>
                       </div>
                     </div>
                   </div>

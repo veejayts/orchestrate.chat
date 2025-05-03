@@ -27,6 +27,26 @@ const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState<string>('');
+  // Track animation state to handle dismiss animation properly
+  const [isClosing, setIsClosing] = useState(false);
+  
+  // Handle close animation
+  const handleClose = () => {
+    if (onMobileClose && isMobileOpen) {
+      setIsClosing(true);
+      setTimeout(() => {
+        setIsClosing(false);
+        onMobileClose();
+      }, 300); // Match animation duration
+    }
+  };
+  
+  // Reset closing state when sidebar opens
+  useEffect(() => {
+    if (isMobileOpen) {
+      setIsClosing(false);
+    }
+  }, [isMobileOpen]);
   
   // Get today and yesterday dates for grouping
   const today = new Date();
@@ -59,7 +79,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const handleSelectChat = (chatId: string) => {
     onSelectChat(chatId);
     if (window.innerWidth < 768 && onMobileClose) {
-      onMobileClose();
+      handleClose();
     }
   };
 
@@ -120,17 +140,21 @@ const Sidebar: React.FC<SidebarProps> = ({
     );
   };
 
-  // Add CSS classes depending on whether sidebar is visible on mobile
+  // Updated sidebar classes with animation
   const sidebarClasses = `sidebar h-screen w-60 md:w-60 flex flex-col border-r border-zinc-800 
-    ${isMobileOpen ? 'fixed md:relative z-50 w-3/4' : 'hidden md:flex'}`;
+    ${isMobileOpen || isClosing
+      ? 'fixed md:relative z-50 w-3/4' 
+      : 'hidden md:flex'
+    } ${isMobileOpen && !isClosing ? 'animate-slide-in' : ''} ${isClosing ? 'animate-slide-out' : ''}`;
 
   return (
     <>
-      {/* Overlay for mobile when sidebar is open */}
-      {isMobileOpen && (
+      {/* Overlay for mobile when sidebar is open with fade animation */}
+      {(isMobileOpen || isClosing) && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 z-40 md:hidden" 
-          onClick={onMobileClose}
+          className={`fixed inset-0 bg-black z-40 md:hidden ${isClosing ? 'animate-fade-out' : 'animate-fade-in-overlay'}`}
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+          onClick={handleClose}
         />
       )}
 
@@ -138,7 +162,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         <div className="flex items-center justify-between h-14 px-4 border-b border-zinc-800">
           <h1 className="font-bold text-xl">Orchestrate</h1>
           <button 
-            onClick={onMobileClose}
+            onClick={handleClose}
             className="md:hidden text-gray-400 hover:text-white"
             aria-label="Close sidebar"
           >
