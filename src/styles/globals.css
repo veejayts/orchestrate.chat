@@ -34,7 +34,11 @@ body {
 }
 
 .message-content p {
-  @apply mb-2 last:mb-0;
+  @apply mb-1 last:mb-0; /* Reduced margin from mb-2 to mb-1 */
+}
+
+.message-content p:only-child {
+  @apply mb-0; /* No margin if there's only one paragraph */
 }
 
 .message-content pre {
@@ -81,8 +85,61 @@ body {
   }
 }
 
+/* Animation for slide in */
+@keyframes slideInLeft {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideOutLeft {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes fadeInOverlay {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 0.5;
+  }
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 0.5;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
 .animate-fade-in {
   animation: fadeIn 0.3s ease-out forwards;
+}
+
+.animate-slide-in {
+  animation: slideInLeft 0.3s ease-out forwards;
+}
+
+.animate-slide-out {
+  animation: slideOutLeft 0.3s ease-out forwards;
+}
+
+.animate-fade-in-overlay {
+  animation: fadeInOverlay 0.3s ease-out forwards;
+}
+
+.animate-fade-out {
+  animation: fadeOut 0.3s ease-out forwards;
 }
 
 /* Media queries for responsive design */
