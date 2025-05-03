@@ -587,6 +587,218 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     }
   };
 
+  // Handle retry message - regenerate AI response for a user message
+  const handleRetryMessage = async (index: number) => {
+    // Don't do anything if we're already loading
+    if (isLoading) return;
+    
+    // Make sure this is a valid user message with a next message
+    if (index < 0 || index >= messages.length - 1 || messages[index].role !== 'user') {
+      return;
+    }
+    
+    // Get the user message that we want to retry
+    const userMessage = messages[index];
+    
+    // Get the current assistant message (the one that follows)
+    const assistantMessage = messages[index + 1];
+    
+    // Make sure we have an active chat
+    if (!activeChatId) {
+      console.error('No active chat for retry');
+      return;
+    }
+    
+    // Set loading state
+    setIsLoading(true);
+    
+    // If the assistant message has an ID, we'll update it instead of creating a new one
+    const messageId = assistantMessage.messageid;
+    
+    try {
+      // Format conversation history (including all messages up to the user message)
+      const conversationHistory = messages.slice(0, index + 1);
+      
+      // Update the UI to show that the message is being regenerated
+      setMessages((prevMessages) => {
+        const newMessages = [...prevMessages];
+        
+        // Update the assistant message to show loading state
+        if (index + 1 < newMessages.length && newMessages[index + 1].role === 'assistant') {
+          newMessages[index + 1] = {
+            ...newMessages[index + 1],
+            content: 'Regenerating...',
+          };
+        }
+        
+        return newMessages;
+      });
+      
+      if (enableStreaming) {
+        // For streaming, we'll use the streaming approach
+        setStreamingMessageId(messageId || null);
+        
+        // Accumulated content for database updates
+        let accumulatedContent = '';
+        
+        // Create a new AbortController for this request
+        const controller = new AbortController();
+        setAbortController(controller);
+        
+        // Handle streaming chunks
+        await getChatCompletionStream(
+          conversationHistory,
+          selectedModel,
+          (chunk) => {
+            // Update the message content as chunks arrive
+            const contentDelta = chunk.choices[0].delta.content || '';
+            
+            // Only add content if there's something to add
+            if (contentDelta) {
+              accumulatedContent += contentDelta;
+              
+              // Update UI
+              setMessages((prevMessages) => {
+                const newMessages = [...prevMessages];
+                // We're specifically updating the message at index + 1
+                if (index + 1 < newMessages.length && newMessages[index + 1].role === 'assistant') {
+                  newMessages[index + 1] = {
+                    ...newMessages[index + 1],
+                    content: accumulatedContent,
+                    model: chunk.model,
+                    messageid: messageId || undefined // Keep the message ID
+                  };
+                }
+                
+                return newMessages;
+              });
+              
+              // Periodically update the message in the database if we have a messageId
+              if (messageId && accumulatedContent.length % 100 === 0) {
+                updateStreamingMessage(messageId, accumulatedContent).catch(console.error);
+              }
+            }
+          },
+          () => {
+            // When streaming is complete, save the final message to the database
+            if (messageId && accumulatedContent) {
+              updateStreamingMessage(messageId, accumulatedContent).catch(console.error);
+            }
+            setIsLoading(false);
+            setStreamingMessageId(null);
+            setAbortController(null);
+          },
+          (error) => {
+            console.error('Error during streaming retry:', error);
+            
+            // Check if this was an abort error (user canceled the request)
+            const wasAborted = error.name === 'AbortError' || error.message === 'Request aborted';
+            
+            // Handle error in UI
+            setMessages((prevMessages) => {
+              const newMessages = [...prevMessages];
+              
+              // Update the specific assistant message with an error
+              if (index + 1 < newMessages.length && newMessages[index + 1].role === 'assistant') {
+                if (accumulatedContent) {
+                  // Keep what we have so far and add error message if not aborted
+                  newMessages[index + 1].content = accumulatedContent + 
+                    (wasAborted ? '\n\n_Generation stopped._' : '\n\n_Error: Message streaming was interrupted._');
+                } else {
+                  // Replace loading message with error or abort message
+                  newMessages[index + 1].content = wasAborted 
+                    ? 'Generation stopped.'
+                    : 'Sorry, there was an error processing your request.';
+                }
+              }
+              
+              return newMessages;
+            });
+            
+            // Save error state to database if we have a messageId
+            if (messageId) {
+              const errorMessage = accumulatedContent 
+                ? accumulatedContent + (wasAborted 
+                    ? '\n\n_Generation stopped._' 
+                    : '\n\n_Error: Message streaming was interrupted._')
+                : wasAborted 
+                  ? 'Generation stopped.'
+                  : 'Sorry, there was an error processing your request.';
+                  
+              updateStreamingMessage(messageId, errorMessage).catch(console.error);
+            }
+            
+            setIsLoading(false);
+            setStreamingMessageId(null);
+            setAbortController(null);
+          },
+          controller.signal
+        );
+      } else {
+        // Non-streaming approach
+        const controller = new AbortController();
+        setAbortController(controller);
+        
+        // Get AI response using the selected model
+        const response = await getChatCompletion(conversationHistory, selectedModel, controller.signal);
+        
+        if (response.choices && response.choices.length > 0) {
+          const newAssistantMessage = response.choices[0].message;
+          
+          // Update the message in the UI
+          setMessages((prevMessages) => {
+            const newMessages = [...prevMessages];
+            if (index + 1 < newMessages.length && newMessages[index + 1].role === 'assistant') {
+              newMessages[index + 1] = {
+                ...newMessages[index + 1],
+                content: newAssistantMessage.content,
+                model: response.model,
+              };
+            }
+            return newMessages;
+          });
+          
+          // Update the message in the database
+          if (messageId) {
+            await updateStreamingMessage(messageId, newAssistantMessage.content);
+          } else {
+            // If for some reason we don't have a message ID, create a new one
+            await saveMessage(activeChatId, newAssistantMessage.content, response.model);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error retrying message:', error);
+      
+      // Check if this was an abort error
+      const wasAborted = error instanceof Error && 
+        (error.name === 'AbortError' || error.message === 'Request aborted');
+      
+      // Update the message in the UI with an error
+      setMessages((prevMessages) => {
+        const newMessages = [...prevMessages];
+        if (index + 1 < newMessages.length && newMessages[index + 1].role === 'assistant') {
+          newMessages[index + 1] = {
+            ...newMessages[index + 1],
+            content: wasAborted ? 'Generation stopped.' : 'Sorry, there was an error processing your request.',
+          };
+        }
+        return newMessages;
+      });
+      
+      // Update the message in the database with an error
+      if (messageId) {
+        const errorContent = wasAborted 
+          ? 'Generation stopped.' 
+          : 'Sorry, there was an error processing your request.';
+        await updateStreamingMessage(messageId, errorContent);
+      }
+    } finally {
+      setIsLoading(false);
+      setAbortController(null);
+    }
+  };
+
   // Handle deleting a chat
   const handleDeleteChat = async (chatId: string) => {
     try {
@@ -817,6 +1029,15 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                                 aria-label="Edit message"
                               >
                                 ✏️
+                              </button>
+                            )}
+                            {message.role === 'user' && (
+                              <button
+                                onClick={() => handleRetryMessage(index)}
+                                className="p-1 text-green-400 hover:text-green-300 transition-colors"
+                                aria-label="Retry message"
+                              >
+                                🔄
                               </button>
                             )}
                             <button
