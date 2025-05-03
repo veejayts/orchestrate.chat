@@ -102,7 +102,8 @@ export async function getUserChats(): Promise<Chat[]> {
 export function dbMessagesToChatMessages(messages: ChatMessageDB[]): ChatMessage[] {
   return messages.map(msg => ({
     role: msg.source === 'user' ? 'user' : 'assistant' as 'user' | 'assistant',
-    content: msg.message
+    content: msg.message,
+    model: msg.source !== 'user' ? msg.source : undefined
   }));
 }
 

@@ -168,7 +168,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     }
 
     try {
-      // Prepare conversation history for API call
+      // Format conversation history exactly as specified
       const conversationHistory = [...messages, userMessage];
       
       // Get AI response using the selected model
@@ -313,7 +313,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                     } animate-fade-in`}
                   >
                     <div className="text-xs text-zinc-500 mb-1 px-1">
-                      {message.role === 'user' ? user.email : `AI (${formatModelName(selectedModel)})`}
+                      {message.role === 'user' ? user.email : `AI (${formatModelName(message.model || selectedModel)})`}
                     </div>
                     <div
                       className={

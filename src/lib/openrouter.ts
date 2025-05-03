@@ -1,6 +1,7 @@
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
+  model?: string;
 }
 
 export interface ChatCompletionResponse {
@@ -60,6 +61,12 @@ export async function getChatCompletion(
     throw new Error('OpenRouter API key is not set');
   }
 
+  // Format the request body exactly as specified
+  const requestBody = {
+    "model": model,
+    "messages": messages
+  };
+
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -68,10 +75,7 @@ export async function getChatCompletion(
       'HTTP-Referer': process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000',
       'X-Title': 'Orchestrate Chat'
     },
-    body: JSON.stringify({
-      model,
-      messages,
-    }),
+    body: JSON.stringify(requestBody),
   });
 
   if (!response.ok) {
@@ -79,5 +83,12 @@ export async function getChatCompletion(
     throw new Error(`OpenRouter API error: ${error}`);
   }
 
-  return await response.json();
+  const data = await response.json();
+  
+  // Ensure we're using the same model ID that we sent in the request
+  // This ensures consistency between what's selected and what's returned
+  return {
+    ...data,
+    model: model
+  };
 }
