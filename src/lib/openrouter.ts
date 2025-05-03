@@ -2,6 +2,7 @@ export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
   model?: string;
+  messageid?: string;
 }
 
 export interface ChatCompletionResponse {

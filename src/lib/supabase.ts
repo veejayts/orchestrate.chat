@@ -44,8 +44,8 @@ export interface Chat {
 }
 
 export interface ChatMessageDB {
-  messageId?: string;
-  chatId: string;
+  messageid?: string;
+  chatid: string;
   message: string;
   source: string;
   created_at?: string;
@@ -218,6 +218,29 @@ export async function deleteChat(chatId: string): Promise<boolean> {
     return true;
   } catch (error) {
     console.error('Error deleting chat:', error);
+    return false;
+  }
+}
+
+// Delete a single message
+export async function deleteMessage(messageId: string): Promise<boolean> {
+  // Don't attempt to delete if messageId is undefined or empty
+  if (!messageId || messageId === 'undefined') {
+    console.error('Invalid message ID for deletion');
+    return false;
+  }
+
+  try {
+    const { error } = await supabase
+      .from('chats')
+      .delete()
+      .eq('messageid', messageId);
+    
+    if (error) throw error;
+    
+    return true;
+  } catch (error) {
+    console.error('Error deleting message:', error);
     return false;
   }
 }

@@ -14,12 +14,14 @@ import {
   getChatMessages, 
   getUserChats, 
   dbMessagesToChatMessages, 
-  Chat, 
+  Chat,
+  ChatMessageDB,
   updateChatTitle, 
   supabase,
   saveStreamingMessage,
   updateStreamingMessage,
-  deleteChat
+  deleteChat,
+  deleteMessage
 } from '@/lib/supabase';
 import Sidebar from './Sidebar';
 
@@ -124,6 +126,31 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     }
   }, [activeChatId]);
 
+  // Handle deleting a message
+  const handleDeleteMessage = async (messageId: string) => {
+    // Don't attempt to delete if messageId is undefined or empty
+    if (!messageId || messageId === 'undefined') {
+      console.error('Invalid message ID for deletion:', messageId);
+      return;
+    }
+
+    try {
+      // Delete the message from the database
+      const success = await deleteMessage(messageId);
+      
+      if (success) {
+        // Remove the message from the UI
+        setMessages((prevMessages) => 
+          prevMessages.filter(message => message.messageid !== messageId)
+        );
+      } else {
+        console.error('Failed to delete message');
+      }
+    } catch (error) {
+      console.error('Error deleting message:', error);
+    }
+  };
+
   // Scroll to bottom of chat when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -143,8 +170,17 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
   };
 
   const loadChatMessages = async (chatId: string) => {
-    const chatMessages = await getChatMessages(chatId);
-    setMessages(dbMessagesToChatMessages(chatMessages));
+    const chatMessagesDb = await getChatMessages(chatId);
+    
+    // Convert DB messages to the format we need, preserving the original messageid
+    const enhancedMessages = chatMessagesDb.map(msg => ({
+      role: msg.source === 'user' ? 'user' : 'assistant' as 'user' | 'assistant',
+      content: msg.message,
+      model: msg.source !== 'user' ? msg.source : undefined,
+      messageId: msg.messageid // Map database messageid to messageId in our frontend
+    }));
+    
+    setMessages(enhancedMessages);
   };
 
   // Handle streaming submission
@@ -538,7 +574,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                     key={index}
                     className={`flex flex-col ${
                       message.role === 'user' ? 'items-end' : 'items-start'
-                    } animate-fade-in`}
+                    } animate-fade-in group`}
                   >
                     <div className="text-xs text-zinc-500 mb-1 px-1">
                       {message.role === 'user' ? user.email : `AI (${formatModelName(message.model || selectedModel)})`}
@@ -559,6 +595,17 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                         >
                           {message.content}
                         </ReactMarkdown>
+                      </div>
+                      
+                      {/* Delete button - always visible */}
+                      <div className="mt-2 border-t border-zinc-700 pt-2">
+                        <button
+                          onClick={() => handleDeleteMessage(message.messageid!)}
+                          className="text-red-400 text-sm hover:text-red-300"
+                          style={{ display: message.messageid ? 'block' : 'none' }}
+                        >
+                          🗑️ Delete
+                        </button>
                       </div>
                     </div>
                   </div>
