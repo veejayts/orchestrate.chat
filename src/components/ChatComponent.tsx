@@ -1,0 +1,204 @@
+import React, { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+import { ChatMessage, getChatCompletion } from '@/lib/openrouter';
+import Sidebar from './Sidebar';
+
+// Sample suggestion questions
+const SUGGESTIONS = [
+  "How does AI work?",
+  "Are black holes real?",
+  "How many Rs are in the word \"strawberry\"?",
+  "What is the meaning of life?"
+];
+
+interface ChatComponentProps {
+  userId: string | null;
+  user: any;
+  onSignOut: () => Promise<void>;
+}
+
+const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }) => {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState<string>('');
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Scroll to bottom of chat when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // Auto-resize textarea as content grows
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+    }
+  }, [input]);
+
+  const handleSubmit = async (e: React.FormEvent | null, submittedText: string = input) => {
+    if (e) e.preventDefault();
+    
+    const messageText = submittedText.trim();
+    if (!messageText || isLoading) return;
+
+    // Add user message to chat
+    const userMessage: ChatMessage = { role: 'user', content: messageText };
+    setMessages((prev) => [...prev, userMessage]);
+    setInput('');
+    setIsLoading(true);
+
+    try {
+      // Prepare conversation history for API call
+      const conversationHistory = [...messages, userMessage];
+      
+      // Get AI response
+      const response = await getChatCompletion(conversationHistory);
+      
+      if (response.choices && response.choices.length > 0) {
+        const assistantMessage = response.choices[0].message;
+        setMessages((prev) => [...prev, assistantMessage]);
+      }
+    } catch (error) {
+      console.error('Error getting chat completion:', error);
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: 'Sorry, there was an error processing your request.' },
+      ]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handle suggestion click
+  const handleSuggestionClick = (suggestion: string) => {
+    handleSubmit(null, suggestion);
+  };
+
+  // Handle Enter key for submission (Shift+Enter for new line)
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit(null, input);
+    }
+  };
+
+  const handleNewChat = () => {
+    setMessages([]);
+  };
+
+  return (
+    <div className="flex h-screen overflow-hidden">
+      <Sidebar onNewChat={handleNewChat} user={user} onSignOut={onSignOut} />
+      
+      <main className="flex-1 flex flex-col h-screen">
+        <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent">
+          {messages.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center px-4">
+              <h1 className="text-3xl font-semibold mb-8">How can I help you?</h1>
+              
+              <div className="grid grid-cols-2 gap-3 max-w-2xl w-full mb-8">
+                <button className="suggestion-button flex items-center justify-center gap-2">
+                  <span className="text-purple-400">✨</span>Create
+                </button>
+                <button className="suggestion-button flex items-center justify-center gap-2">
+                  <span className="text-blue-400">📚</span>Explore
+                </button>
+                <button className="suggestion-button flex items-center justify-center gap-2">
+                  <span className="text-green-400">🧩</span>Code
+                </button>
+                <button className="suggestion-button flex items-center justify-center gap-2">
+                  <span className="text-amber-400">🎓</span>Learn
+                </button>
+              </div>
+              
+              <div className="space-y-3 max-w-2xl w-full">
+                {SUGGESTIONS.map((suggestion, index) => (
+                  <button 
+                    key={index}
+                    className="suggestion-button w-full text-left"
+                    onClick={() => handleSuggestionClick(suggestion)}
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="max-w-3xl mx-auto w-full py-8 px-4">
+              <div className="flex flex-col space-y-4">
+                {messages.map((message, index) => (
+                  <div
+                    key={index}
+                    className={`flex ${
+                      message.role === 'user' ? 'justify-end' : 'justify-start'
+                    } animate-fade-in`}
+                  >
+                    <div
+                      className={
+                        message.role === 'user'
+                          ? 'chat-message-user'
+                          : 'chat-message-assistant'
+                      }
+                    >
+                      <div className="message-content">
+                        <ReactMarkdown>{message.content}</ReactMarkdown>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+        </div>
+
+        <div className="p-4 md:p-6">
+          <div className="max-w-3xl mx-auto">
+            <form onSubmit={(e) => handleSubmit(e)} className="chat-input-container">
+              <div className="flex items-end">
+                <textarea
+                  ref={textareaRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Type your message here..."
+                  className="flex-1 bg-transparent resize-none max-h-36 py-2 px-3 focus:outline-none text-gray-100 min-h-[44px]"
+                  rows={1}
+                  disabled={isLoading}
+                />
+                <div className="flex items-center pl-2">
+                  <div className="flex items-center border-l border-zinc-700/50 pl-2">
+                    <button
+                      type="submit"
+                      disabled={isLoading || !input.trim()}
+                      className="p-2 rounded-md text-gray-300 hover:text-white disabled:opacity-50 disabled:hover:text-gray-300"
+                    >
+                      {isLoading ? (
+                        <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                      ) : (
+                        <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                          <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </form>
+            <div className="flex mt-2 justify-between items-center text-xs text-zinc-500">
+              <div>Press Enter to send</div>
+              <div>Gemini 2.5 Flash</div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+};
+
+export default ChatComponent;
