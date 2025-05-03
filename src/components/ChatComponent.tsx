@@ -595,7 +595,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                           : 'chat-message-assistant'
                       }
                     >
-                      <div className="message-content">
+                      <div className="message-content relative group">
                         <ReactMarkdown
                           components={{
                             // Use proper spacing for single-line messages
@@ -604,17 +604,17 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                         >
                           {message.content}
                         </ReactMarkdown>
-                      </div>
-                      
-                      {/* Delete button - always visible */}
-                      <div className="mt-2 border-t border-zinc-700 pt-2">
-                        <button
-                          onClick={() => handleDeleteMessage(message.messageid!)}
-                          className="text-red-400 text-sm hover:text-red-300"
-                          style={{ display: message.messageid ? 'block' : 'none' }}
-                        >
-                          🗑️ Delete
-                        </button>
+                        
+                        {/* Delete button - visible only on hover */}
+                        {message.messageid && (
+                          <button
+                            onClick={() => handleDeleteMessage(message.messageid!)}
+                            className="absolute top-0 right-0 p-1.5 text-red-400 opacity-0 group-hover:opacity-100 hover:text-red-300 transition-opacity duration-200 bg-zinc-800 rounded-md"
+                            aria-label="Delete message"
+                          >
+                            🗑️
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
