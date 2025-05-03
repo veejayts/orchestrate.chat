@@ -4,7 +4,37 @@ import { ChatMessage } from './openrouter';
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Configure Supabase client with persistent sessions
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    storageKey: 'orchestrate-chat-auth',
+    storage: {
+      getItem: (key) => {
+        if (typeof window !== 'undefined') {
+          return JSON.parse(localStorage.getItem(key) || 'null');
+        }
+        return null;
+      },
+      setItem: (key, value) => {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(key, JSON.stringify(value));
+        }
+      },
+      removeItem: (key) => {
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem(key);
+        }
+      },
+    },
+  },
+  // Global settings for storing cookies across the entire site
+  global: {
+    headers: {
+      'X-Client-Info': 'orchestrate-chat'
+    },
+  },
+});
 
 // Chat database functions
 export interface Chat {
