@@ -177,7 +177,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
       role: msg.source === 'user' ? 'user' : 'assistant' as 'user' | 'assistant',
       content: msg.message,
       model: msg.source !== 'user' ? msg.source : undefined,
-      messageId: msg.messageid // Map database messageid to messageId in our frontend
+      messageid: msg.messageid // Keep consistent with the property name used in the delete button
     }));
     
     setMessages(enhancedMessages);
@@ -255,28 +255,35 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
         selectedModel,
         (chunk) => {
           // Update the message content as chunks arrive
-          setMessages((prevMessages) => {
-            const newMessages = [...prevMessages];
-            const lastMessageIndex = newMessages.length - 1;
-            
-            if (lastMessageIndex >= 0 && newMessages[lastMessageIndex].role === 'assistant') {
-              const contentDelta = chunk.choices[0].delta.content || '';
-              accumulatedContent += contentDelta;
-              
-              newMessages[lastMessageIndex] = {
-                ...newMessages[lastMessageIndex],
-                content: accumulatedContent,
-                model: chunk.model
-              };
-            }
-            
-            return newMessages;
-          });
+          const contentDelta = chunk.choices[0].delta.content || '';
           
-          // Periodically update the message in the database
-          // Only update every ~50 characters to reduce database writes
-          if (accumulatedContent.length % 50 === 0 && messageId) {
-            updateStreamingMessage(messageId, accumulatedContent).catch(console.error);
+          // Only add content if there's something to add
+          if (contentDelta) {
+            accumulatedContent += contentDelta;
+            
+            // Update UI
+            setMessages((prevMessages) => {
+              const newMessages = [...prevMessages];
+              const lastMessageIndex = newMessages.length - 1;
+              
+              if (lastMessageIndex >= 0 && newMessages[lastMessageIndex].role === 'assistant') {
+                newMessages[lastMessageIndex] = {
+                  ...newMessages[lastMessageIndex],
+                  content: accumulatedContent,
+                  model: chunk.model,
+                  messageid: messageId || undefined // Make sure the message ID is still attached
+                };
+              }
+              
+              return newMessages;
+            });
+            
+            // Periodically update the message in the database
+            // Only update every ~100 characters to reduce database writes
+            if (accumulatedContent.length % 100 === 0 && messageId) {
+              // We use a separate call to updateStreamingMessage to avoid race conditions
+              updateStreamingMessage(messageId, accumulatedContent).catch(console.error);
+            }
           }
         },
         () => {
@@ -310,6 +317,8 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                   ? 'Generation stopped.'
                   : 'Sorry, there was an error processing your request.';
               }
+              // Make sure the message ID is still attached
+              newMessages[lastMessageIndex].messageid = messageId || undefined;
             }
             
             return newMessages;
