@@ -110,8 +110,8 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <div className="sidebar h-screen w-60 flex flex-col border-r border-zinc-800">
-      <div className="flex items-center h-14 px-4 border-b border-zinc-800">
-        <h1 className="font-bold text-xl">Orchestrate.chat</h1>
+      <div className="flex items-center justify-center h-14 px-4 border-b border-zinc-800">
+        <h1 className="font-bold text-xl">Orchestrate</h1>
       </div>
       
       <div className="p-3">

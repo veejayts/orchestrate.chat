@@ -266,10 +266,13 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                 {messages.map((message, index) => (
                   <div
                     key={index}
-                    className={`flex ${
-                      message.role === 'user' ? 'justify-end' : 'justify-start'
+                    className={`flex flex-col ${
+                      message.role === 'user' ? 'items-end' : 'items-start'
                     } animate-fade-in`}
                   >
+                    <div className="text-xs text-zinc-500 mb-1 px-1">
+                      {message.role === 'user' ? user.email : `AI (${formatModelName(selectedModel)})`}
+                    </div>
                     <div
                       className={
                         message.role === 'user'
@@ -316,7 +319,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                         </svg>
                       ) : (
-                        <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                        <svg className="h-5 w-5 transform rotate-90" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
                           <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
                         </svg>
                       )}
