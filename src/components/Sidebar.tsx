@@ -206,7 +206,9 @@ const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       <div className="p-3 border-t border-zinc-800">
-        <ProfilePopup user={user} onSignOut={onSignOut} />
+        <div className="flex items-center justify-between">
+          <ProfilePopup user={user} onSignOut={onSignOut} />
+        </div>
       </div>
     </div>
   );

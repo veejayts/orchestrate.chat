@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { ChatMessage, getChatCompletion } from '@/lib/openrouter';
+import { ChatMessage, getChatCompletion, getAvailableModels, OpenRouterModel } from '@/lib/openrouter';
 import { createChat, saveMessage, getChatMessages, getUserChats, dbMessagesToChatMessages, Chat, updateChatTitle } from '@/lib/supabase';
 import Sidebar from './Sidebar';
 
@@ -24,6 +24,9 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [userChats, setUserChats] = useState<Chat[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string>('google/gemini-2.0-flash-001');
+  const [availableModels, setAvailableModels] = useState<OpenRouterModel[]>([]);
+  const [isModelDropdownOpen, setIsModelDropdownOpen] = useState<boolean>(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -33,6 +36,20 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
       loadUserChats();
     }
   }, [userId]);
+
+  // Load available models
+  useEffect(() => {
+    const loadModels = async () => {
+      try {
+        const models = await getAvailableModels();
+        setAvailableModels(models);
+      } catch (error) {
+        console.error('Error loading available models:', error);
+      }
+    };
+    
+    loadModels();
+  }, []);
 
   // Load messages for active chat
   useEffect(() => {
@@ -110,8 +127,8 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
       // Prepare conversation history for API call
       const conversationHistory = [...messages, userMessage];
       
-      // Get AI response
-      const response = await getChatCompletion(conversationHistory);
+      // Get AI response using the selected model
+      const response = await getChatCompletion(conversationHistory, selectedModel);
       
       if (response.choices && response.choices.length > 0) {
         const assistantMessage = response.choices[0].message;
@@ -159,6 +176,10 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     if (success) {
       loadUserChats(); // Refresh the chat list with updated titles
     }
+  };
+
+  const handleModelChange = (modelId: string) => {
+    setSelectedModel(modelId);
   };
 
   return (
@@ -273,7 +294,36 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
             </form>
             <div className="flex mt-2 justify-between items-center text-xs text-zinc-500">
               <div>Press Enter to send</div>
-              <div>Gemini 2.5 Flash</div>
+              <div className="relative">
+                <button 
+                  onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
+                  className="hover:text-white cursor-pointer transition-colors"
+                  aria-label="Select model"
+                >
+                  {selectedModel.split('/').pop() || 'AI Model'} ▼
+                </button>
+                {isModelDropdownOpen && (
+                  <div className="absolute bottom-full right-0 z-10 w-56 mb-2 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg overflow-hidden">
+                    {availableModels.map((model) => (
+                      <div
+                        key={model.id}
+                        className={`px-3 py-2 text-sm hover:bg-zinc-700 cursor-pointer ${
+                          selectedModel === model.id ? 'bg-purple-900/40 font-medium' : ''
+                        }`}
+                        onClick={() => {
+                          setSelectedModel(model.id);
+                          setIsModelDropdownOpen(false);
+                        }}
+                      >
+                        <div className="font-medium">{model.name}</div>
+                        {model.description && (
+                          <div className="text-xs text-zinc-400 truncate mt-0.5">{model.description}</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
