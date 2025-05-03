@@ -18,7 +18,8 @@ import {
   updateChatTitle, 
   supabase,
   saveStreamingMessage,
-  updateStreamingMessage
+  updateStreamingMessage,
+  deleteChat
 } from '@/lib/supabase';
 import Sidebar from './Sidebar';
 
@@ -396,6 +397,29 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     }
   };
 
+  // Handle deleting a chat
+  const handleDeleteChat = async (chatId: string) => {
+    try {
+      // Delete the chat from the database
+      const success = await deleteChat(chatId);
+      
+      if (success) {
+        // If we're deleting the active chat, clear the UI
+        if (chatId === activeChatId) {
+          setMessages([]);
+          setActiveChatId(null);
+        }
+        
+        // Refresh the chat list
+        loadUserChats();
+      } else {
+        console.error('Failed to delete chat');
+      }
+    } catch (error) {
+      console.error('Error deleting chat:', error);
+    }
+  };
+
   // Handle suggestion click
   const handleSuggestionClick = (suggestion: string) => {
     handleSubmit(null, suggestion);
@@ -454,6 +478,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
         activeChatId={activeChatId}
         onSelectChat={handleSelectChat}
         onUpdateChatTitle={handleUpdateChatTitle}
+        onDeleteChat={handleDeleteChat}
         isMobileOpen={isMobileSidebarOpen}
         onMobileClose={() => setIsMobileSidebarOpen(false)}
       />

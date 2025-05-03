@@ -195,3 +195,29 @@ export async function updateChatTitle(chatId: string, title: string): Promise<bo
     return false;
   }
 }
+
+// Delete a chat and all its messages
+export async function deleteChat(chatId: string): Promise<boolean> {
+  try {
+    // First delete all chat messages
+    const { error: messagesError } = await supabase
+      .from('chats')
+      .delete()
+      .eq('chatid', chatId);
+    
+    if (messagesError) throw messagesError;
+    
+    // Then delete the chat metadata
+    const { error: metaError } = await supabase
+      .from('chats_meta')
+      .delete()
+      .eq('chatid', chatId);
+    
+    if (metaError) throw metaError;
+    
+    return true;
+  } catch (error) {
+    console.error('Error deleting chat:', error);
+    return false;
+  }
+}
