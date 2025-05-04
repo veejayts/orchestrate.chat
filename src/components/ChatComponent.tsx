@@ -914,23 +914,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
         <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent" ref={chatContainerRef}>
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center px-4">
-              <h1 className="text-2xl md:text-3xl font-semibold mb-8 text-center">How can I help you?</h1>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl w-full mb-8">
-                <button className="suggestion-button flex items-center justify-center gap-2">
-                  <span className="text-purple-400">✨</span>Create
-                </button>
-                <button className="suggestion-button flex items-center justify-center gap-2">
-                  <span className="text-blue-400">📚</span>Explore
-                </button>
-                <button className="suggestion-button flex items-center justify-center gap-2">
-                  <span className="text-green-400">🧩</span>Code
-                </button>
-                <button className="suggestion-button flex items-center justify-center gap-2">
-                  <span className="text-amber-400">🎓</span>Learn
-                </button>
-              </div>
-              
+              <h1 className="text-2xl md:text-3xl font-semibold mb-8 text-center">How can I help you?</h1>              
               <div className="space-y-3 max-w-2xl w-full px-2">
                 {SUGGESTIONS.map((suggestion, index) => (
                   <button 
@@ -1226,7 +1210,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                     </div>
                   )}
                 </div>
-                <div className="relative flex justify-end">
+                <div className="md:hidden relative flex justify-end">
                   <label htmlFor="fileUpload" className="cursor-pointer hover:text-white transition-colors">
                     Import Conversation
                   </label>
