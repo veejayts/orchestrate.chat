@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import ReactMarkdown from 'react-markdown';
+import Markdown from 'markdown-to-jsx';
 import { 
   ChatMessage, 
   getAvailableModels, 
@@ -938,14 +938,19 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                             </div>
                           </div>
                         ) : (
-                          <ReactMarkdown
-                            components={{
-                              // Use proper spacing for single-line messages
-                              p: ({node, ...props}) => <p style={{marginBottom: '0'}} {...props} />
+                          <Markdown
+                            options={{
+                              overrides: {
+                                p: {
+                                  props: {
+                                    style: { marginBottom: '0' }
+                                  }
+                                }
+                              }
                             }}
                           >
                             {message.content}
-                          </ReactMarkdown>
+                          </Markdown>
                         )}
                         
                         {/* Message action buttons - visible only on hover */}
