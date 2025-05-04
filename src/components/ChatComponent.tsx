@@ -52,9 +52,9 @@ interface OpenRouterExport {
 // Sample suggestion questions
 const SUGGESTIONS = [
   "How does AI work?",
-  "Are black holes real?",
   "How many Rs are in the word \"strawberry\"?",
-  "What is the meaning of life?"
+  "Explain Descartes' 'I think, therefore I am' argument.",
+  "Why is JavaScript the worst language?"
 ];
 
 interface ChatComponentProps {
