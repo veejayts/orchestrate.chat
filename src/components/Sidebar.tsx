@@ -191,7 +191,11 @@ const Sidebar: React.FC<SidebarProps> = ({
       return (
         <input
           type="text"
-          className="w-full px-2 py-1 bg-zinc-700 border border-zinc-600 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-purple-500"
+          className={`w-full px-2 py-1 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-purple-500 ${
+            theme === 'dark' 
+              ? 'bg-zinc-700 border border-zinc-600 text-white' 
+              : 'bg-white border border-zinc-300 text-gray-800'
+          }`}
           value={editingTitle}
           onChange={handleTitleChange}
           onBlur={handleTitleBlur}
@@ -203,12 +207,18 @@ const Sidebar: React.FC<SidebarProps> = ({
 
     return (
       <div 
-        className={`group flex items-center justify-between px-2 py-2 text-sm rounded-lg hover:bg-zinc-800/50 dark:hover:bg-zinc-800/50 
+        className={`group flex items-center justify-between px-2 py-2 text-sm rounded-lg 
+          ${theme === 'dark'
+            ? 'hover:bg-zinc-800/50'
+            : 'hover:bg-purple-100/50'
+          }
           ${isActive 
             ? theme === 'dark'
               ? 'bg-zinc-800 text-white' 
               : 'bg-purple-100 text-purple-900'
-            : ''
+            : theme === 'dark'
+              ? 'text-gray-300'
+              : 'text-gray-800'
           }`}
       >
         <div 
@@ -220,7 +230,11 @@ const Sidebar: React.FC<SidebarProps> = ({
         </div>
         {onDeleteChat && (
           <button
-            className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-red-400 transition-all duration-200 p-1"
+            className={`opacity-0 group-hover:opacity-100 p-1 transition-all duration-200 ${
+              theme === 'dark'
+                ? 'text-zinc-500 hover:text-red-400'
+                : 'text-zinc-400 hover:text-red-500'
+            }`}
             onClick={(e) => {
               e.stopPropagation();
               if (window.confirm('Are you sure you want to delete this chat? This action cannot be undone.')) {
@@ -239,7 +253,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   };
 
   // Updated sidebar classes with animation
-  const sidebarClasses = `sidebar h-screen w-60 md:w-60 flex flex-col border-r border-zinc-800 
+  const sidebarClasses = `sidebar h-screen w-60 md:w-60 flex flex-col ${theme === 'dark' ? 'border-r border-zinc-800' : 'border-r border-zinc-200'} 
     ${isMobileOpen || isClosing
       ? 'fixed md:relative z-50 w-3/4' 
       : 'hidden md:flex'
@@ -257,7 +271,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       )}
 
       <div className={sidebarClasses}>
-        <div className="flex items-center justify-between h-14 px-4 border-b border-zinc-800">
+        <div className={`flex items-center justify-between h-14 px-4 ${theme === 'dark' ? 'border-b border-zinc-800' : 'border-b border-zinc-200'}`}>
           <h1 className="font-bold text-xl">Orchestrate</h1>
           <div className="flex items-center">
             <ThemeToggle className="mr-3" />
@@ -278,7 +292,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             onClick={onNewChat}
             className="new-chat-button w-full mb-4"
             style={{
-              backgroundColor: 'rgba(88, 28, 135, 0.6)', // bg-purple-900/60
+              backgroundColor: theme === 'dark' ? 'rgba(88, 28, 135, 0.6)' : 'rgba(107, 70, 193, 0.8)',
               color: 'white',
               fontWeight: '500',
               padding: '0.75rem 1rem',
@@ -286,7 +300,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              border: '1px solid rgba(126, 34, 206, 0.5)', // border-purple-700/50
+              border: theme === 'dark' ? '1px solid rgba(126, 34, 206, 0.5)' : '1px solid rgba(126, 34, 206, 0.7)',
               transition: 'background-color 200ms'
             }}
           >
@@ -330,6 +344,11 @@ const Sidebar: React.FC<SidebarProps> = ({
 
         <div ref={loadingRef} className="h-10 flex items-center justify-center text-sm text-zinc-500">
           {isLoading && 'Loading more chats...'}
+        </div>
+        
+        {/* User profile at bottom of sidebar */}
+        <div className={`mt-auto p-3 ${theme === 'dark' ? 'border-t border-zinc-800' : 'border-t border-zinc-200'}`}>
+          <ProfilePopup user={user} onSignOut={onSignOut} />
         </div>
       </div>
     </>

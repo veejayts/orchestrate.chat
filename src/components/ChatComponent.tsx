@@ -21,7 +21,10 @@ import {
   saveStreamingMessage,
   updateStreamingMessage,
   deleteChat,
-  deleteMessage
+  deleteMessage,
+  getUserOpenRouterApiKey,
+  setUserOpenRouterApiKey,
+  ensureUserRecord
 } from '@/lib/supabase';
 import Sidebar from './Sidebar';
 

@@ -1,3 +1,5 @@
+import { getUserOpenRouterApiKey } from './supabase';
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
@@ -70,10 +72,11 @@ export async function getChatCompletion(
   model: string = 'google/gemini-2.0-flash-001',
   signal?: AbortSignal
 ): Promise<ChatCompletionResponse> {
-  const apiKey = process.env.NEXT_PUBLIC_OPENROUTER_API_KEY;
+  // Get the user's API key from the database
+  const apiKey = await getUserOpenRouterApiKey();
   
   if (!apiKey) {
-    throw new Error('OpenRouter API key is not set');
+    throw new Error('OpenRouter API key is not set for this user');
   }
 
   // Format the request body exactly as specified
@@ -117,10 +120,11 @@ export async function getChatCompletionStream(
   onError: (error: Error) => void,
   signal?: AbortSignal
 ): Promise<void> {
-  const apiKey = process.env.NEXT_PUBLIC_OPENROUTER_API_KEY;
+  // Get the user's API key from the database
+  const apiKey = await getUserOpenRouterApiKey();
   
   if (!apiKey) {
-    onError(new Error('OpenRouter API key is not set'));
+    onError(new Error('OpenRouter API key is not set for this user'));
     return;
   }
 
