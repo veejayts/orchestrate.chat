@@ -243,6 +243,11 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
         setSelectedModel(mostRecentAssistantMsg.source);
       }
     }
+    
+    // Scroll to the latest message after loading the chat
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    }, 100);
   };
 
   // Function to import OpenRouter conversations
@@ -832,6 +837,10 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
   // Handle suggestion click
   const handleSuggestionClick = (suggestion: string) => {
     handleSubmit(null, suggestion);
+    // Add this to scroll to bottom after clicking a suggestion
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    }, 300); // Slightly longer timeout to account for message generation
   };
 
   // Handle Enter key for submission (Shift+Enter for new line)
@@ -846,6 +855,11 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     setMessages([]);
     setActiveChatId(null);
     setIsMobileSidebarOpen(false);
+    
+    // Add a small delay to ensure DOM updates before scrolling
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    }, 100);
   };
 
   const handleSelectChat = (chatId: string) => {
@@ -1108,7 +1122,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                       aria-label="Stop generation"
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clipRule="evenodd" />
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clipRule="evenodd" />
                       </svg>
                     </button>
                   )}
