@@ -277,16 +277,6 @@ export async function getUserChats(limit: number = 30, offset: number = 0): Prom
   }
 }
 
-// Convert database messages to the format expected by OpenRouter
-export function dbMessagesToChatMessages(messages: ChatMessageDB[]): ChatMessage[] {
-  return messages.map(msg => ({
-    role: msg.source === 'user' ? 'user' : 'assistant' as 'user' | 'assistant',
-    content: msg.message,
-    model: msg.source !== 'user' ? msg.source : undefined,
-    messageid: msg.messageid
-  }));
-}
-
 // Update the chat title
 export async function updateChatTitle(chatId: string, title: string): Promise<boolean> {
   try {
@@ -381,77 +371,5 @@ export async function getUserOpenRouterApiKey(): Promise<string | null> {
   } catch (error) {
     console.error('Error getting user API key:', error);
     return null;
-  }
-}
-
-// Set user's OpenRouter API key
-export async function setUserOpenRouterApiKey(apiKey: string): Promise<boolean> {
-  try {
-    const userId = await getCurrentUserId();
-    if (!userId) {
-      console.error('User not authenticated');
-      return false;
-    }
-
-    // Check if user record exists
-    const { data: existingUser } = await supabase
-      .from('user')
-      .select('user_id')
-      .eq('user_id', userId)
-      .single();
-
-    if (existingUser) {
-      // Update existing record
-      const { error } = await supabase
-        .from('user')
-        .update({ openrouter_api_key: apiKey })
-        .eq('user_id', userId);
-      
-      if (error) throw error;
-    } else {
-      // Insert new record
-      const { error } = await supabase
-        .from('user')
-        .insert([{ user_id: userId, openrouter_api_key: apiKey }]);
-      
-      if (error) throw error;
-    }
-    
-    return true;
-  } catch (error) {
-    console.error('Error setting user API key:', error);
-    return false;
-  }
-}
-
-// Create user record if it doesn't exist (useful after signup)
-export async function ensureUserRecord(): Promise<boolean> {
-  try {
-    const userId = await getCurrentUserId();
-    if (!userId) {
-      console.error('User not authenticated');
-      return false;
-    }
-
-    // Check if user record exists
-    const { data: existingUser } = await supabase
-      .from('user')
-      .select('user_id')
-      .eq('user_id', userId)
-      .single();
-
-    if (!existingUser) {
-      // Create new user record with default API key
-      const { error } = await supabase
-        .from('user')
-        .insert([{ user_id: userId }]);
-      
-      if (error) throw error;
-    }
-    
-    return true;
-  } catch (error) {
-    console.error('Error ensuring user record exists:', error);
-    return false;
   }
 }

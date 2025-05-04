@@ -1,5 +1,23 @@
 import { getUserOpenRouterApiKey } from './supabase';
 
+// Add a variable to cache the API key in memory
+let cachedApiKey: string | null = null;
+
+// Function to get the cached API key or fetch a new one
+export async function getApiKey(): Promise<string | null> {
+  if (cachedApiKey !== null) {
+    return cachedApiKey;
+  }
+  
+  cachedApiKey = await getUserOpenRouterApiKey();
+  return cachedApiKey;
+}
+
+// Function to clear the cached API key (useful when user updates their key)
+export function clearCachedApiKey(): void {
+  cachedApiKey = null;
+}
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
@@ -72,8 +90,8 @@ export async function getChatCompletion(
   model: string = 'google/gemini-2.0-flash-001',
   signal?: AbortSignal
 ): Promise<ChatCompletionResponse> {
-  // Get the user's API key from the database
-  const apiKey = await getUserOpenRouterApiKey();
+  // Get the user's API key from the cache or database
+  const apiKey = await getApiKey();
   
   if (!apiKey) {
     throw new Error('OpenRouter API key is not set for this user');
@@ -120,8 +138,8 @@ export async function getChatCompletionStream(
   onError: (error: Error) => void,
   signal?: AbortSignal
 ): Promise<void> {
-  // Get the user's API key from the database
-  const apiKey = await getUserOpenRouterApiKey();
+  // Get the user's API key from the cache or database
+  const apiKey = await getApiKey();
   
   if (!apiKey) {
     onError(new Error('OpenRouter API key is not set for this user'));

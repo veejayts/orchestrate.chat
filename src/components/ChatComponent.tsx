@@ -6,25 +6,19 @@ import {
   getAvailableModels, 
   OpenRouterModel, 
   getChatCompletionStream, 
-  ChatCompletionChunk 
 } from '@/lib/openrouter';
 import { 
   createChat, 
   saveMessage, 
   getChatMessages, 
   getUserChats, 
-  dbMessagesToChatMessages, 
   Chat,
-  ChatMessageDB,
   updateChatTitle, 
   supabase,
   saveStreamingMessage,
   updateStreamingMessage,
   deleteChat,
   deleteMessage,
-  getUserOpenRouterApiKey,
-  setUserOpenRouterApiKey,
-  ensureUserRecord
 } from '@/lib/supabase';
 import Sidebar from './Sidebar';
 
@@ -83,8 +77,6 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [enableStreaming, setEnableStreaming] = useState<boolean>(true);
   const [abortController, setAbortController] = useState<AbortController | null>(null);
-  const [isDeleting, setIsDeleting] = useState<boolean>(false);
-  const [isAddingMessage, setIsAddingMessage] = useState<boolean>(false); // Add a state to track when we're adding a new message
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
