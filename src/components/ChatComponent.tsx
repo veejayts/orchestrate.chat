@@ -140,6 +140,12 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     }
   }, [userId]);
 
+  const loadUserChats = async () => {
+    // Initial load of first 50 chats
+    const chats = await getUserChats(50, 0);
+    setUserChats(chats);
+  };
+
   // Load available models
   useEffect(() => {
     const loadModels = async () => {
@@ -218,11 +224,6 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
       textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
     }
   }, [input]);
-
-  const loadUserChats = async () => {
-    const chats = await getUserChats();
-    setUserChats(chats);
-  };
 
   const loadChatMessages = async (chatId: string) => {
     const chatMessagesDb = await getChatMessages(chatId);

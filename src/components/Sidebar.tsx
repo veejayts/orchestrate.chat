@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import ProfilePopup from './ProfilePopup';
 import ThemeToggle from './ThemeToggle';
-import { Chat } from '@/lib/supabase';
+import { Chat, getUserChats } from '@/lib/supabase';
 
 interface SidebarProps {
   onNewChat: () => void;
@@ -14,20 +14,29 @@ interface SidebarProps {
   onDeleteChat?: (chatId: string) => Promise<void>;
   isMobileOpen?: boolean;
   onMobileClose?: () => void;
+  loadChats?: () => Promise<void>; // Optional prop for initial chat loading
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ 
   onNewChat, 
   user, 
   onSignOut, 
-  chats = [], 
+  chats: initialChats = [], 
   activeChatId,
   onSelectChat,
   onUpdateChatTitle,
   onDeleteChat,
   isMobileOpen = false,
-  onMobileClose
+  onMobileClose,
+  loadChats
 }) => {
+  const [chats, setChats] = useState<Chat[]>(initialChats);
+  const [offset, setOffset] = useState<number>(0);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [hasMore, setHasMore] = useState<boolean>(true);
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const loadingRef = useRef<HTMLDivElement>(null);
+  
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState<string>('');
   // Track animation state to handle dismiss animation properly
@@ -44,6 +53,71 @@ const Sidebar: React.FC<SidebarProps> = ({
     }
   };
   
+  // Initialize with chats from props if available
+  useEffect(() => {
+    if (initialChats.length > 0) {
+      setChats(initialChats);
+      setOffset(initialChats.length);
+    } else {
+      loadMoreChats();
+    }
+  }, [initialChats]);
+  
+  // Load more chats when scrolling
+  const loadMoreChats = useCallback(async () => {
+    if (isLoading || !hasMore) return;
+    
+    setIsLoading(true);
+    try {
+      const limit = 50;
+      const newChats = await getUserChats(limit, offset);
+      
+      if (newChats.length === 0) {
+        setHasMore(false);
+      } else {
+        setChats(prevChats => [...prevChats, ...newChats]);
+        setOffset(prevOffset => prevOffset + newChats.length);
+      }
+    } catch (error) {
+      console.error('Error loading more chats:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [offset, isLoading, hasMore]);
+  
+  // Setup intersection observer for infinite scrolling
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !isLoading) {
+          loadMoreChats();
+        }
+      },
+      { threshold: 0.1 }
+    );
+    
+    observerRef.current = observer;
+    
+    return () => {
+      if (observerRef.current) {
+        observerRef.current.disconnect();
+      }
+    };
+  }, [loadMoreChats, hasMore, isLoading]);
+  
+  // Attach observer to the loading element
+  useEffect(() => {
+    if (loadingRef.current && observerRef.current) {
+      observerRef.current.observe(loadingRef.current);
+    }
+    
+    return () => {
+      if (loadingRef.current && observerRef.current) {
+        observerRef.current.unobserve(loadingRef.current);
+      }
+    };
+  }, [loadingRef.current, observerRef.current]);
+  
   // Reset closing state when sidebar opens
   useEffect(() => {
     if (isMobileOpen) {
@@ -51,28 +125,22 @@ const Sidebar: React.FC<SidebarProps> = ({
     }
   }, [isMobileOpen]);
   
-  // Get today and yesterday dates for grouping
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-  
-  // Format dates for comparison
-  const todayStr = today.toDateString();
-  const yesterdayStr = yesterday.toDateString();
-  
-  // Group chats by date
+  // Group chats by recency based on latest_chat_timestamp
   const groupedChats = {
-    today: [] as Chat[],
-    yesterday: [] as Chat[],
+    recent: [] as Chat[],
     older: [] as Chat[]
   };
   
+  // Calculate date for two days ago
+  const twoDaysAgo = new Date();
+  twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+  
   chats.forEach(chat => {
-    const chatDate = new Date(chat.created_at);
-    if (chatDate.toDateString() === todayStr) {
-      groupedChats.today.push(chat);
-    } else if (chatDate.toDateString() === yesterdayStr) {
-      groupedChats.yesterday.push(chat);
+    // Use latest_chat_timestamp instead of created_at
+    const chatTimestamp = new Date(chat.latest_chat_timestamp || chat.created_at);
+    
+    if (chatTimestamp >= twoDaysAgo) {
+      groupedChats.recent.push(chat);
     } else {
       groupedChats.older.push(chat);
     }
@@ -220,31 +288,15 @@ const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         <div className="flex-1 overflow-y-auto px-2 py-2">
-          {/* Today's chats */}
-          {groupedChats.today.length > 0 && (
+          {/* Recent chats */}
+          {groupedChats.recent.length > 0 && (
             <div className="mb-4">
               <div className="px-2 py-1 text-xs font-medium text-zinc-500">
-                Today
+                Recent
               </div>
               <div className="space-y-1 mt-1">
-                {groupedChats.today.map(chat => (
-                  <div key={chat.chatId}>
-                    {renderChatItem(chat)}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Yesterday's chats */}
-          {groupedChats.yesterday.length > 0 && (
-            <div className="mb-4">
-              <div className="px-2 py-1 text-xs font-medium text-zinc-500">
-                Yesterday
-              </div>
-              <div className="space-y-1 mt-1">
-                {groupedChats.yesterday.map(chat => (
-                  <div key={chat.chatId}>
+                {groupedChats.recent.map((chat, index) => (
+                  <div key={`recent-${chat.chatId}-${index}`}>
                     {renderChatItem(chat)}
                   </div>
                 ))}
@@ -259,8 +311,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                 Older
               </div>
               <div className="space-y-1 mt-1">
-                {groupedChats.older.map(chat => (
-                  <div key={chat.chatId}>
+                {groupedChats.older.map((chat, index) => (
+                  <div key={`older-${chat.chatId}-${index}`}>
                     {renderChatItem(chat)}
                   </div>
                 ))}
@@ -269,10 +321,8 @@ const Sidebar: React.FC<SidebarProps> = ({
           )}
         </div>
 
-        <div className="p-3 border-t border-zinc-800">
-          <div className="flex items-center justify-between">
-            <ProfilePopup user={user} onSignOut={onSignOut} />
-          </div>
+        <div ref={loadingRef} className="h-10 flex items-center justify-center text-sm text-zinc-500">
+          {isLoading && 'Loading more chats...'}
         </div>
       </div>
     </>
