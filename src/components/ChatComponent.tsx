@@ -77,6 +77,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
   const [abortController, setAbortController] = useState<AbortController | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -155,10 +156,10 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
 
   // Load messages for active chat
   useEffect(() => {
-    if (activeChatId) {
+    if (activeChatId && !isSubmitting) { // Skip loading during first message submission
       loadChatMessages(activeChatId);
     }
-  }, [activeChatId]);
+  }, [activeChatId, isSubmitting]);
 
   // Handle deleting a message
   const handleDeleteMessage = async (messageId: string) => {
@@ -345,6 +346,9 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     const messageText = submittedText.trim();
     if (!messageText || isLoading) return;
 
+    // Set submitting state to true immediately to prevent UI flashing
+    setIsSubmitting(true);
+    
     // Create a new chat if one doesn't exist
     let currentChatId = activeChatId;
     let isNewChat = false;
@@ -352,6 +356,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
       const chatId = await createChat();
       if (!chatId) {
         console.error('Failed to create a new chat');
+        setIsSubmitting(false); // Reset state if creation fails
         return;
       }
       currentChatId = chatId;
@@ -384,8 +389,11 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
       });
     }
 
-    // Add user message to chat
+    // Add user message to chat - modify this section to ensure UI consistency
     const userMessage: ChatMessage = { role: 'user', content: messageText };
+    
+    // Update messages state immediately with the user message only
+    // This ensures the messages array is not empty and prevents UI flashing
     setMessages((prev) => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
@@ -405,7 +413,8 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     }
 
     try {
-      // Format conversation history
+      // Format conversation history - pass the updated array with the new message
+      // This ensures consistency between what's shown in UI and what's sent to API
       const conversationHistory = [...messages, userMessage];
       
       // Create initial message in UI
@@ -433,7 +442,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
         selectedModel,
         (chunk) => {
           // Update the message content as chunks arrive
-          const contentDelta = chunk.choices[0].delta.content || '';
+          const contentDelta = chunk.choices[0]?.delta?.content || '';
           
           // Only add content if there's something to add
           if (contentDelta) {
@@ -467,11 +476,27 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
         () => {
           // When streaming is complete, save the final message to the database
           if (messageId && accumulatedContent) {
-            updateStreamingMessage(messageId, accumulatedContent).catch(console.error);
+            updateStreamingMessage(messageId, accumulatedContent)
+              .then(() => {
+                // Only after successfully updating the message in the database, reset states
+                setIsLoading(false);
+                setStreamingMessageId(null);
+                setAbortController(null);
+                setIsSubmitting(false); // Reset submitting state
+              })
+              .catch(error => {
+                console.error('Error updating final message:', error);
+                setIsLoading(false);
+                setStreamingMessageId(null);
+                setAbortController(null);
+                setIsSubmitting(false); // Reset submitting state even on error
+              });
+          } else {
+            setIsLoading(false);
+            setStreamingMessageId(null);
+            setAbortController(null);
+            setIsSubmitting(false); // Reset submitting state
           }
-          setIsLoading(false);
-          setStreamingMessageId(null);
-          setAbortController(null);
         },
         (error) => {
           console.error('Error during streaming:', error);
@@ -518,6 +543,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
           setIsLoading(false);
           setStreamingMessageId(null);
           setAbortController(null);
+          setIsSubmitting(false); // Reset submitting state
         },
         controller.signal
       );
@@ -530,6 +556,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
       await saveMessage(currentChatId, errorMessage.content, 'system');
       setIsLoading(false);
       setAbortController(null);
+      setIsSubmitting(false); // Reset submitting state
     }
   };
 
@@ -601,7 +628,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
         selectedModel,
         (chunk) => {
           // Update the message content as chunks arrive
-          const contentDelta = chunk.choices[0].delta.content || '';
+          const contentDelta = chunk.choices[0]?.delta?.content || '';
           
           // Only add content if there's something to add
           if (contentDelta) {
@@ -827,7 +854,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
         </div>
 
         <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent" ref={chatContainerRef}>
-          {messages.length === 0 ? (
+          {(messages.length === 0 && !activeChatId && !isSubmitting) ? (
             <div className="h-full flex flex-col items-center justify-center px-4">
               <h1 className="text-2xl md:text-3xl font-semibold mb-8 text-center">How can I help you?</h1>              
               <div className="space-y-3 max-w-2xl w-full px-2">
