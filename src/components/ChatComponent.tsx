@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { 
   ChatMessage, 
-  getChatCompletion, 
   getAvailableModels, 
   OpenRouterModel, 
   getChatCompletionStream, 
@@ -360,6 +359,29 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
       isNewChat = true;
       // Add the new chat to the user's chats
       loadUserChats();
+    } else {
+      // Update the local userChats to move the current chat to the top
+      setUserChats(prevChats => {
+        // Find the current chat in the array
+        const updatedChats = [...prevChats];
+        const currentChatIndex = updatedChats.findIndex(chat => chat.chatId === currentChatId);
+        
+        if (currentChatIndex !== -1) {
+          // Create a copy of the current chat with updated timestamp
+          const currentChat = { 
+            ...updatedChats[currentChatIndex],
+            latest_chat_timestamp: new Date().toISOString()
+          };
+          
+          // Remove the chat from its current position
+          updatedChats.splice(currentChatIndex, 1);
+          
+          // Add it back at the beginning of the array
+          updatedChats.unshift(currentChat);
+        }
+        
+        return updatedChats;
+      });
     }
 
     // Add user message to chat

@@ -85,51 +85,6 @@ export async function getAvailableModels(): Promise<OpenRouterModel[]> {
   }
 }
 
-export async function getChatCompletion(
-  messages: ChatMessage[],
-  model: string = 'google/gemini-2.0-flash-001',
-  signal?: AbortSignal
-): Promise<ChatCompletionResponse> {
-  // Get the user's API key from the cache or database
-  const apiKey = await getApiKey();
-  
-  if (!apiKey) {
-    throw new Error('OpenRouter API key is not set for this user');
-  }
-
-  // Format the request body exactly as specified
-  const requestBody = {
-    "model": model,
-    "messages": messages
-  };
-
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-      'HTTP-Referer': process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000',
-      'X-Title': 'Orchestrate Chat'
-    },
-    body: JSON.stringify(requestBody),
-    signal, // Add the abort signal
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`OpenRouter API error: ${error}`);
-  }
-
-  const data = await response.json();
-  
-  // Ensure we're using the same model ID that we sent in the request
-  // This ensures consistency between what's selected and what's returned
-  return {
-    ...data,
-    model: model
-  };
-}
-
 export async function getChatCompletionStream(
   messages: ChatMessage[],
   model: string = 'google/gemini-2.0-flash-001',
