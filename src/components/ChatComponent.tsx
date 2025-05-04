@@ -634,7 +634,6 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
         },
         controller.signal,
         isWebSearch, // Enable web search for this request
-        isWebSearch ? 10 : 5 // Use 10 results for web search, default 5 for normal queries
       );
     } catch (error) {
       console.error('Error setting up streaming:', error);
