@@ -137,7 +137,7 @@ export async function getChatCompletionStream(
     requestBody.plugins = [
       {
         "id": "web",
-        "max_results": process.env.NEXT_PUBLIC_WEB_SEARCH_MAX_RESULTS || 5,
+        "max_results": (process.env.NEXT_PUBLIC_WEB_SEARCH_MAX_RESULTS ? Number.parseInt(process.env.NEXT_PUBLIC_WEB_SEARCH_MAX_RESULTS) : 5),
         "search_context_size": process.env.NEXT_PUBLIC_WEB_SEARCH_CONTEXT_SIZE || 5,
       }
     ];
