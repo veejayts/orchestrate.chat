@@ -3,10 +3,11 @@ import { useTheme } from './ThemeContext';
 
 interface ProfilePopupProps {
   user: any;
+  userDisplayName?: string | null;
   onSignOut: () => Promise<void>;
 }
 
-const ProfilePopup: React.FC<ProfilePopupProps> = ({ user, onSignOut }) => {
+const ProfilePopup: React.FC<ProfilePopupProps> = ({ user, userDisplayName, onSignOut }) => {
   const [isOpen, setIsOpen] = useState(false);
   const popupRef = useRef<HTMLDivElement>(null);
   const { theme } = useTheme();
@@ -27,6 +28,7 @@ const ProfilePopup: React.FC<ProfilePopupProps> = ({ user, onSignOut }) => {
 
   // Get user initials for avatar
   const getUserInitials = () => {
+    if (userDisplayName) return userDisplayName.charAt(0).toUpperCase();
     if (!user || !user.email) return 'U';
     return user.email.charAt(0).toUpperCase();
   };
@@ -43,7 +45,7 @@ const ProfilePopup: React.FC<ProfilePopupProps> = ({ user, onSignOut }) => {
           {getUserInitials()}
         </div>
         <div className="flex-1">
-          <div className={`text-sm font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-800'}`}>{user.email || 'User'}</div>
+          <div className={`text-sm font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-800'}`}>{userDisplayName || user.email || 'User'}</div>
           <div className="text-xs text-gray-400">Free</div>
         </div>
       </div>
@@ -53,8 +55,13 @@ const ProfilePopup: React.FC<ProfilePopupProps> = ({ user, onSignOut }) => {
           theme === 'dark' ? 'bg-zinc-800' : 'bg-white border border-zinc-200'
         }`}>
           <div className={`p-3 ${theme === 'dark' ? 'border-b border-zinc-700' : 'border-b border-zinc-200'}`}>
-            <div className={`text-sm font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-800'}`}>{user.email}</div>
-            <div className="text-xs text-gray-400">Free Account</div>
+            <div className={`text-sm font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-800'}`}>
+              {userDisplayName || 'User'}
+            </div>
+            <div className={`text-xs ${theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}`}>
+              {user.email}
+            </div>
+            <div className="text-xs text-gray-400 mt-1">Free Account</div>
           </div>
           <div className="p-2">
             <button

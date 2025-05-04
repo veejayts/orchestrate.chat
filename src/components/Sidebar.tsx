@@ -7,6 +7,7 @@ import { useTheme } from './ThemeContext';
 interface SidebarProps {
   onNewChat: () => void;
   user: any;
+  userDisplayName?: string | null;
   onSignOut: () => Promise<void>;
   chats?: Chat[];
   activeChatId: string | null;
@@ -21,6 +22,7 @@ interface SidebarProps {
 const Sidebar: React.FC<SidebarProps> = ({ 
   onNewChat, 
   user, 
+  userDisplayName,
   onSignOut, 
   chats: initialChats = [], 
   activeChatId,
@@ -352,7 +354,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         
         {/* User profile at bottom of sidebar */}
         <div className={`mt-auto p-3 ${theme === 'dark' ? 'border-t border-zinc-800' : 'border-t border-zinc-200'}`}>
-          <ProfilePopup user={user} onSignOut={onSignOut} />
+          <ProfilePopup user={user} userDisplayName={userDisplayName} onSignOut={onSignOut} />
         </div>
       </div>
     </>

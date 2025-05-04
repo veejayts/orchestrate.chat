@@ -19,6 +19,7 @@ import {
   updateStreamingMessage,
   deleteChat,
   deleteMessage,
+  getUserDisplayName,
 } from '@/lib/supabase';
 import Sidebar from './Sidebar';
 
@@ -60,10 +61,11 @@ const SUGGESTIONS = [
 interface ChatComponentProps {
   userId: string | null;
   user: any;
+  userDisplayName: string | null;
   onSignOut: () => Promise<void>;
 }
 
-const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }) => {
+const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, userDisplayName, onSignOut }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -87,6 +89,9 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
   const scrollPositionRef = useRef<number>(0);
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
+  // Get user display name for messages
+  const [userDisplayNameState, setUserDisplayNameState] = useState<string | null>(null);
+
   // Add this useEffect to handle auth state changes
   useEffect(() => {
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
@@ -106,6 +111,18 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
       authListener?.subscription.unsubscribe();
     };
   }, []); // Empty dependency array ensures this runs only once on mount
+
+  // Load user display name
+  useEffect(() => {
+    const loadUserDisplayName = async () => {
+      if (userId) {
+        const displayName = await getUserDisplayName();
+        setUserDisplayNameState(displayName);
+      }
+    };
+    
+    loadUserDisplayName();
+  }, [userId]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -916,6 +933,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
       <Sidebar 
         onNewChat={handleNewChat} 
         user={user} 
+        userDisplayName={userDisplayName}
         onSignOut={onSignOut}
         chats={userChats}
         activeChatId={activeChatId}
@@ -967,7 +985,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                     } animate-fade-in group`}
                   >
                     <div className="text-xs text-zinc-500 mb-1 px-1">
-                      {message.role === 'user' ? user.email : `AI (${formatModelName(message.model || selectedModel)})`}
+                      {message.role === 'user' ? userDisplayName || user.email : `AI (${formatModelName(message.model || selectedModel)})`}
                     </div>
                     <div
                       className={

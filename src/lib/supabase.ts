@@ -393,3 +393,35 @@ export async function getUserOpenRouterApiKey(): Promise<string | null> {
     return null;
   }
 }
+
+// Get user's display name (username or email if username is null)
+export async function getUserDisplayName(): Promise<string | null> {
+  try {
+    const { data: userData } = await supabase.auth.getUser();
+    if (!userData?.user) {
+      console.error('User not authenticated');
+      return null;
+    }
+
+    const userId = userData.user.id;
+    const userEmail = userData.user.email;
+
+    // Get username from the user table
+    const { data, error } = await supabase
+      .from('user')
+      .select('username')
+      .eq('user_id', userId)
+      .single();
+    
+    if (error) {
+      console.error('Error fetching username:', error);
+      return userEmail || 'User';
+    }
+    
+    // Return username if available, otherwise return email
+    return data?.username || userEmail || 'User';
+  } catch (error) {
+    console.error('Error getting user display name:', error);
+    return null;
+  }
+}
