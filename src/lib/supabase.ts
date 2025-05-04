@@ -114,6 +114,16 @@ export async function saveMessage(
       return null;
     }
     
+    // Update latest_chat_timestamp in the chats_meta table
+    const { error: updateError } = await supabase
+      .from('chats_meta')
+      .update({ latest_chat_timestamp: new Date().toISOString() })
+      .eq('chatid', chatId);
+      
+    if (updateError) {
+      console.error('Error updating latest_chat_timestamp:', updateError);
+    }
+    
     // Now insert the message
     const { data, error } = await supabase
       .from('chats')
@@ -157,6 +167,16 @@ export async function saveStreamingMessage(
     if (chatError || !chatData) {
       console.error('Chat not found or user does not have access', chatError);
       return null;
+    }
+    
+    // Update latest_chat_timestamp in the chats_meta table
+    const { error: updateError } = await supabase
+      .from('chats_meta')
+      .update({ latest_chat_timestamp: new Date().toISOString() })
+      .eq('chatid', chatId);
+      
+    if (updateError) {
+      console.error('Error updating latest_chat_timestamp:', updateError);
     }
     
     // Now insert the message

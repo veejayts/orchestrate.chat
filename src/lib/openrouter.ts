@@ -23,6 +23,7 @@ export interface ChatMessage {
   content: string;
   model?: string;
   messageid?: string;
+  citations?: WebSearchCitation[];
 }
 
 export interface ChatCompletionResponse {
@@ -34,6 +35,26 @@ export interface ChatCompletionResponse {
   }[];
 }
 
+export interface UrlCitation {
+  start_index: number;
+  end_index: number;
+  title: string;
+  url: string;
+  content: string;
+}
+
+export interface Annotation {
+  type: 'url_citation';
+  url_citation: UrlCitation;
+}
+
+export interface WebSearchCitation {
+  title: string;
+  url: string;
+  text?: string;
+  number: number;
+}
+
 export interface ChatCompletionChunk {
   id: string;
   model: string;
@@ -41,6 +62,8 @@ export interface ChatCompletionChunk {
     delta: {
       content?: string;
       role?: string;
+      annotations?: Annotation[];
+      citations?: WebSearchCitation[];
     };
     finish_reason: string | null;
     index: number;
@@ -85,58 +108,15 @@ export async function getAvailableModels(): Promise<OpenRouterModel[]> {
   }
 }
 
-export async function getChatCompletion(
-  messages: ChatMessage[],
-  model: string = 'google/gemini-2.0-flash-001',
-  signal?: AbortSignal
-): Promise<ChatCompletionResponse> {
-  // Get the user's API key from the cache or database
-  const apiKey = await getApiKey();
-  
-  if (!apiKey) {
-    throw new Error('OpenRouter API key is not set for this user');
-  }
-
-  // Format the request body exactly as specified
-  const requestBody = {
-    "model": model,
-    "messages": messages
-  };
-
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-      'HTTP-Referer': process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000',
-      'X-Title': 'Orchestrate Chat'
-    },
-    body: JSON.stringify(requestBody),
-    signal, // Add the abort signal
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`OpenRouter API error: ${error}`);
-  }
-
-  const data = await response.json();
-  
-  // Ensure we're using the same model ID that we sent in the request
-  // This ensures consistency between what's selected and what's returned
-  return {
-    ...data,
-    model: model
-  };
-}
-
 export async function getChatCompletionStream(
   messages: ChatMessage[],
   model: string = 'google/gemini-2.0-flash-001',
   onChunk: (chunk: ChatCompletionChunk) => void,
   onDone: () => void,
   onError: (error: Error) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  useWebSearch: boolean = false,
+  webSearchMaxResults: number = 10
 ): Promise<void> {
   // Get the user's API key from the cache or database
   const apiKey = await getApiKey();
@@ -147,11 +127,22 @@ export async function getChatCompletionStream(
   }
 
   // Format the request body with streaming enabled
-  const requestBody = {
+  const requestBody: any = {
     "model": model,
     "messages": messages,
     "stream": true
   };
+
+  // Add web search plugin if requested
+  if (useWebSearch) {
+    requestBody.plugins = [
+      {
+        "id": "web",
+        "max_results": webSearchMaxResults,
+        "search_context_size": "high"
+      }
+    ];
+  }
 
   try {
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
