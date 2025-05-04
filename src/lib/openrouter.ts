@@ -23,6 +23,7 @@ export interface ChatMessage {
   content: string;
   model?: string;
   messageid?: string;
+  citations?: WebSearchCitation[];
 }
 
 export interface ChatCompletionResponse {
@@ -34,6 +35,26 @@ export interface ChatCompletionResponse {
   }[];
 }
 
+export interface UrlCitation {
+  start_index: number;
+  end_index: number;
+  title: string;
+  url: string;
+  content: string;
+}
+
+export interface Annotation {
+  type: 'url_citation';
+  url_citation: UrlCitation;
+}
+
+export interface WebSearchCitation {
+  title: string;
+  url: string;
+  text?: string;
+  number: number;
+}
+
 export interface ChatCompletionChunk {
   id: string;
   model: string;
@@ -41,6 +62,8 @@ export interface ChatCompletionChunk {
     delta: {
       content?: string;
       role?: string;
+      annotations?: Annotation[];
+      citations?: WebSearchCitation[];
     };
     finish_reason: string | null;
     index: number;
@@ -91,7 +114,9 @@ export async function getChatCompletionStream(
   onChunk: (chunk: ChatCompletionChunk) => void,
   onDone: () => void,
   onError: (error: Error) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  useWebSearch: boolean = false,
+  webSearchMaxResults: number = 10
 ): Promise<void> {
   // Get the user's API key from the cache or database
   const apiKey = await getApiKey();
@@ -102,11 +127,22 @@ export async function getChatCompletionStream(
   }
 
   // Format the request body with streaming enabled
-  const requestBody = {
+  const requestBody: any = {
     "model": model,
     "messages": messages,
     "stream": true
   };
+
+  // Add web search plugin if requested
+  if (useWebSearch) {
+    requestBody.plugins = [
+      {
+        "id": "web",
+        "max_results": webSearchMaxResults,
+        "search_context_size": "high"
+      }
+    ];
+  }
 
   try {
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {

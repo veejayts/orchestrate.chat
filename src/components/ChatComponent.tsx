@@ -4,7 +4,8 @@ import {
   ChatMessage, 
   getAvailableModels, 
   OpenRouterModel, 
-  getChatCompletionStream, 
+  getChatCompletionStream,
+  WebSearchCitation, 
 } from '@/lib/openrouter';
 import { 
   createChat, 
@@ -343,8 +344,18 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
   const handleStreamingSubmit = async (e: React.FormEvent | null, submittedText: string = input) => {
     if (e) e.preventDefault();
     
-    const messageText = submittedText.trim();
+    let messageText = submittedText.trim();
     if (!messageText || isLoading) return;
+
+    // Check if this is a web search query
+    const isWebSearch = messageText.startsWith('/websearch');
+    if (isWebSearch) {
+      // Remove the /websearch command from the message
+      messageText = messageText.substring('/websearch'.length).trim();
+      
+      // If there's no query after the command, don't proceed
+      if (!messageText) return;
+    }
 
     // Set submitting state to true immediately to prevent UI flashing
     setIsSubmitting(true);
@@ -389,8 +400,11 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
       });
     }
 
+    // Store the original query for display and database storage
+    const displayMessageText = isWebSearch ? `/websearch ${messageText}` : messageText;
+    
     // Add user message to chat - modify this section to ensure UI consistency
-    const userMessage: ChatMessage = { role: 'user', content: messageText };
+    const userMessage: ChatMessage = { role: 'user', content: displayMessageText };
     
     // Update messages state immediately with the user message only
     // This ensures the messages array is not empty and prevents UI flashing
@@ -399,14 +413,14 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     setIsLoading(true);
 
     // Save user message to database
-    await saveMessage(currentChatId, messageText, 'user');
+    await saveMessage(currentChatId, displayMessageText, 'user');
 
     // Update chat title if this is the first message in a new chat
     if (isNewChat || messages.length === 0) {
       // Get first 25 characters for title
-      const chatTitle = messageText.length > 25 
-        ? messageText.substring(0, 25) + '...' 
-        : messageText;
+      const chatTitle = displayMessageText.length > 25 
+        ? displayMessageText.substring(0, 25) + '...' 
+        : displayMessageText;
       
       await updateChatTitle(currentChatId, chatTitle);
       loadUserChats(); // Refresh chat list to show new title
@@ -414,13 +428,16 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
 
     try {
       // Format conversation history - pass the updated array with the new message
-      // This ensures consistency between what's shown in UI and what's sent to API
-      const conversationHistory = [...messages, userMessage];
+      // For web search, we use the actual search query without the command
+      const conversationHistory = [...messages];
+      
+      // Add the user message with the actual query text for the API
+      conversationHistory.push({ role: 'user', content: messageText });
       
       // Create initial message in UI
       const initialAssistantMessage: ChatMessage = { 
         role: 'assistant', 
-        content: '', 
+        content: isWebSearch ? 'Searching the web...' : '', 
         model: selectedModel 
       };
       setMessages((prev) => [...prev, initialAssistantMessage]);
@@ -429,8 +446,9 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
       const messageId = await saveStreamingMessage(currentChatId, '', selectedModel);
       setStreamingMessageId(messageId);
       
-      // Accumulated content for database updates
+      // Accumulated content and citations for database updates
       let accumulatedContent = '';
+      let collectedCitations: WebSearchCitation[] = [];
       
       // Create a new AbortController for this request
       const controller = new AbortController();
@@ -444,11 +462,47 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
           // Update the message content as chunks arrive
           const contentDelta = chunk.choices[0]?.delta?.content || '';
           
-          // Only add content if there's something to add
-          if (contentDelta) {
-            accumulatedContent += contentDelta;
+          // Process both citation formats (annotations and previous format)
+          const annotations = chunk.choices[0]?.delta?.annotations || [];
+          const citationsDelta = chunk.choices[0]?.delta?.citations || [];
+          
+          // Process content and citations if they exist
+          if (contentDelta || annotations.length > 0 || citationsDelta.length > 0) {
+            if (contentDelta) {
+              accumulatedContent += contentDelta;
+            }
             
-            // Update UI
+            // Process annotations (new format)
+            if (annotations.length > 0) {
+              annotations.forEach(annotation => {
+                if (annotation.type === 'url_citation' && annotation.url_citation) {
+                  // Convert URL citation to our WebSearchCitation format
+                  const { title, url } = annotation.url_citation;
+                  const existingIndex = collectedCitations.findIndex(c => c.url === url);
+                  
+                  if (existingIndex === -1) {
+                    collectedCitations.push({
+                      title: title,
+                      url: url,
+                      text: annotation.url_citation.content,
+                      number: collectedCitations.length + 1
+                    });
+                  }
+                }
+              });
+            }
+            
+            // Process citations (previous format)
+            if (citationsDelta.length > 0) {
+              citationsDelta.forEach(citation => {
+                const existingIndex = collectedCitations.findIndex(c => c.url === citation.url);
+                if (existingIndex === -1) {
+                  collectedCitations.push(citation);
+                }
+              });
+            }
+            
+            // Update UI with the latest content and citations
             setMessages((prevMessages) => {
               const newMessages = [...prevMessages];
               const lastMessageIndex = newMessages.length - 1;
@@ -458,6 +512,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                   ...newMessages[lastMessageIndex],
                   content: accumulatedContent,
                   model: chunk.model,
+                  citations: collectedCitations.length > 0 ? collectedCitations : undefined,
                   messageid: messageId || undefined // Make sure the message ID is still attached
                 };
               }
@@ -474,23 +529,55 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
           }
         },
         () => {
-          // When streaming is complete, save the final message to the database
-          if (messageId && accumulatedContent) {
-            updateStreamingMessage(messageId, accumulatedContent)
-              .then(() => {
-                // Only after successfully updating the message in the database, reset states
-                setIsLoading(false);
-                setStreamingMessageId(null);
-                setAbortController(null);
-                setIsSubmitting(false); // Reset submitting state
-              })
-              .catch(error => {
-                console.error('Error updating final message:', error);
-                setIsLoading(false);
-                setStreamingMessageId(null);
-                setAbortController(null);
-                setIsSubmitting(false); // Reset submitting state even on error
-              });
+          // When streaming is complete, format the message with citations if needed
+          let finalContent = accumulatedContent;
+
+          // Add citatio at the end of the message for display
+          if (collectedCitations.length > 0 && isWebSearch) {
+            // Format and append citations
+            const sortedCitations = [...collectedCitations].sort((a, b) => a.number - b.number);
+            finalContent += '\n\n**Citations:**\n';
+            sortedCitations.forEach((citation, index) => {
+              finalContent += `[${index + 1}] ${citation.title}: ${citation.url}\n`;
+            });
+          }
+
+          // Save the final message to the database - store just the content, not JSON
+          if (messageId && finalContent) {
+            if (isWebSearch) {
+              // For web search, store the content with citations already formatted in the text
+              updateStreamingMessage(messageId, finalContent)
+                .then(() => {
+                  // Only after successfully updating the message in the database, reset states
+                  setIsLoading(false);
+                  setStreamingMessageId(null);
+                  setAbortController(null);
+                  setIsSubmitting(false); // Reset submitting state
+                })
+                .catch(error => {
+                  console.error('Error updating final message:', error);
+                  setIsLoading(false);
+                  setStreamingMessageId(null);
+                  setAbortController(null);
+                  setIsSubmitting(false); // Reset submitting state even on error
+                });
+            } else {
+              // For regular messages, store just the content, not JSON
+              updateStreamingMessage(messageId, accumulatedContent)
+                .then(() => {
+                  setIsLoading(false);
+                  setStreamingMessageId(null);
+                  setAbortController(null);
+                  setIsSubmitting(false);
+                })
+                .catch(error => {
+                  console.error('Error updating final message:', error);
+                  setIsLoading(false);
+                  setStreamingMessageId(null);
+                  setAbortController(null);
+                  setIsSubmitting(false);
+                });
+            }
           } else {
             setIsLoading(false);
             setStreamingMessageId(null);
@@ -545,7 +632,9 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
           setAbortController(null);
           setIsSubmitting(false); // Reset submitting state
         },
-        controller.signal
+        controller.signal,
+        isWebSearch, // Enable web search for this request
+        isWebSearch ? 10 : 5 // Use 10 results for web search, default 5 for normal queries
       );
     } catch (error) {
       console.error('Error setting up streaming:', error);
@@ -853,8 +942,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
           <h1 className="font-bold text-xl">Orchestrate</h1>
         </div>
 
-        <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent" ref={chatContainerRef}>
-          {(messages.length === 0 && !activeChatId && !isSubmitting) ? (
+        <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent w-[26rem] sm:w-auto" ref={chatContainerRef}>          {(messages.length === 0 && !activeChatId && !isSubmitting) ? (
             <div className="h-full flex flex-col items-center justify-center px-4">
               <h1 className="text-2xl md:text-3xl font-semibold mb-8 text-center">How can I help you?</h1>              
               <div className="space-y-3 max-w-2xl w-full px-2">
@@ -945,6 +1033,11 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                                   props: {
                                     style: { marginBottom: '0' }
                                   }
+                                },
+                                a: {
+                                  component: ({ children, ...props }) => (
+                                    <a {...props}>[{children}]</a>
+                                  )
                                 }
                               }
                             }}
