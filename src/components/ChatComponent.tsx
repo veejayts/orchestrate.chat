@@ -79,6 +79,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [username, setUsername] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -86,6 +87,25 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
   // Add a ref to track scroll position
   const scrollPositionRef = useRef<number>(0);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+
+  // Add this useEffect to fetch the username when the component mounts
+  useEffect(() => {
+    const fetchUsername = async () => {
+      if (userId) {
+        const { data, error } = await supabase
+          .from('user')
+          .select('username')
+          .eq('user_id', userId)
+          .single();
+        
+        if (!error && data) {
+          setUsername(data.username);
+        }
+      }
+    };
+
+    fetchUsername();
+  }, [userId]);
 
   // Add this useEffect to handle auth state changes
   useEffect(() => {
@@ -911,6 +931,11 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     setIsMobileSidebarOpen(!isMobileSidebarOpen);
   };
 
+  // Helper function to get the display name for the user
+  const getUserDisplayName = () => {
+    return username || user?.email || 'User';
+  };
+
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar 
@@ -967,7 +992,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                     } animate-fade-in group`}
                   >
                     <div className="text-xs text-zinc-500 mb-1 px-1">
-                      {message.role === 'user' ? user.email : `AI (${formatModelName(message.model || selectedModel)})`}
+                      {message.role === 'user' ? getUserDisplayName() : `AI (${formatModelName(message.model || selectedModel)})`}
                     </div>
                     <div
                       className={
