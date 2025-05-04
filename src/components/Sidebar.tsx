@@ -58,12 +58,16 @@ const Sidebar: React.FC<SidebarProps> = ({
   // Initialize with chats from props if available
   useEffect(() => {
     if (initialChats.length > 0) {
+      // Clear any previously loaded chats to prevent duplication
       setChats(initialChats);
       setOffset(initialChats.length);
     } else {
-      loadMoreChats();
+      // Only load chats if we don't have any and initialChats is empty
+      if (chats.length === 0) {
+        loadMoreChats();
+      }
     }
-  }, [initialChats]);
+  }, [initialChats, chats.length]); // Removing loadMoreChats from dependencies to avoid circular dependency
   
   // Load more chats when scrolling
   const loadMoreChats = useCallback(async () => {
