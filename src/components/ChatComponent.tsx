@@ -6,22 +6,19 @@ import {
   getAvailableModels, 
   OpenRouterModel, 
   getChatCompletionStream, 
-  ChatCompletionChunk 
 } from '@/lib/openrouter';
 import { 
   createChat, 
   saveMessage, 
   getChatMessages, 
   getUserChats, 
-  dbMessagesToChatMessages, 
   Chat,
-  ChatMessageDB,
   updateChatTitle, 
   supabase,
   saveStreamingMessage,
   updateStreamingMessage,
   deleteChat,
-  deleteMessage
+  deleteMessage,
 } from '@/lib/supabase';
 import Sidebar from './Sidebar';
 
@@ -78,10 +75,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
   const [modelSearchQuery, setModelSearchQuery] = useState<string>('');
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
-  const [enableStreaming, setEnableStreaming] = useState<boolean>(true);
   const [abortController, setAbortController] = useState<AbortController | null>(null);
-  const [isDeleting, setIsDeleting] = useState<boolean>(false);
-  const [isAddingMessage, setIsAddingMessage] = useState<boolean>(false); // Add a state to track when we're adding a new message
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -139,6 +133,12 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
       loadUserChats();
     }
   }, [userId]);
+
+  const loadUserChats = async () => {
+    // Initial load of first 50 chats
+    const chats = await getUserChats(50, 0);
+    setUserChats(chats);
+  };
 
   // Load available models
   useEffect(() => {
@@ -219,11 +219,6 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     }
   }, [input]);
 
-  const loadUserChats = async () => {
-    const chats = await getUserChats();
-    setUserChats(chats);
-  };
-
   const loadChatMessages = async (chatId: string) => {
     const chatMessagesDb = await getChatMessages(chatId);
     
@@ -247,6 +242,11 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
         setSelectedModel(mostRecentAssistantMsg.source);
       }
     }
+    
+    // Scroll to the latest message after loading the chat
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    }, 100);
   };
 
   // Function to import OpenRouter conversations
@@ -511,91 +511,9 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     }
   };
 
-  // Modified handleSubmit to use streaming if enabled
+  // Modified handleSubmit to use streaming
   const handleSubmit = async (e: React.FormEvent | null, submittedText: string = input) => {
-    if (enableStreaming) {
-      return handleStreamingSubmit(e, submittedText);
-    }
-    
-    // Original non-streaming implementation
-    if (e) e.preventDefault();
-    
-    const messageText = submittedText.trim();
-    if (!messageText || isLoading) return;
-
-    // Create a new chat if one doesn't exist
-    let currentChatId = activeChatId;
-    let isNewChat = false;
-    if (!currentChatId) {
-      const chatId = await createChat();
-      if (!chatId) {
-        console.error('Failed to create a new chat');
-        return;
-      }
-      currentChatId = chatId;
-      setActiveChatId(chatId);
-      isNewChat = true;
-      // Add the new chat to the user's chats
-      loadUserChats();
-    }
-
-    // Add user message to chat
-    const userMessage: ChatMessage = { role: 'user', content: messageText };
-    setMessages((prev) => [...prev, userMessage]);
-    setInput('');
-    setIsLoading(true);
-
-    // Save user message to database
-    await saveMessage(currentChatId, messageText, 'user');
-
-    // Update chat title if this is the first message in a new chat
-    if (isNewChat || messages.length === 0) {
-      // Get first 25 characters for title
-      const chatTitle = messageText.length > 25 
-        ? messageText.substring(0, 25) + '...' 
-        : messageText;
-      
-      await updateChatTitle(currentChatId, chatTitle);
-      loadUserChats(); // Refresh chat list to show new title
-    }
-
-    try {
-      // Format conversation history exactly as specified
-      const conversationHistory = [...messages, userMessage];
-      
-      // Create a new AbortController for this request
-      const controller = new AbortController();
-      setAbortController(controller);
-      
-      // Get AI response using the selected model
-      const response = await getChatCompletion(conversationHistory, selectedModel, controller.signal);
-      
-      if (response.choices && response.choices.length > 0) {
-        const assistantMessage = response.choices[0].message;
-        setMessages((prev) => [...prev, assistantMessage]);
-        
-        // Save AI response to database with the correct model name
-        await saveMessage(currentChatId, assistantMessage.content, response.model);
-      }
-    } catch (error) {
-      console.error('Error getting chat completion:', error);
-      
-      // Check if this was an abort error (user canceled the request)
-      const wasAborted = error instanceof Error && 
-        (error.name === 'AbortError' || error.message === 'Request aborted');
-      
-      const errorMessage = { 
-        role: 'assistant' as const, 
-        content: wasAborted ? 'Generation stopped.' : 'Sorry, there was an error processing your request.' 
-      };
-      setMessages((prev) => [...prev, errorMessage]);
-      
-      // Save error message to database
-      await saveMessage(currentChatId, errorMessage.content, 'system');
-    } finally {
-      setIsLoading(false);
-      setAbortController(null);
-    }
+    return handleStreamingSubmit(e, submittedText);
   };
 
   // Handle retry message - regenerate AI response for a user message
@@ -645,139 +563,105 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
         return newMessages;
       });
       
-      if (enableStreaming) {
-        // For streaming, we'll use the streaming approach
-        setStreamingMessageId(messageId || null);
-        
-        // Accumulated content for database updates
-        let accumulatedContent = '';
-        
-        // Create a new AbortController for this request
-        const controller = new AbortController();
-        setAbortController(controller);
-        
-        // Handle streaming chunks
-        await getChatCompletionStream(
-          conversationHistory,
-          selectedModel,
-          (chunk) => {
-            // Update the message content as chunks arrive
-            const contentDelta = chunk.choices[0].delta.content || '';
+      // For streaming, we'll use the streaming approach
+      setStreamingMessageId(messageId || null);
+      
+      // Accumulated content for database updates
+      let accumulatedContent = '';
+      
+      // Create a new AbortController for this request
+      const controller = new AbortController();
+      setAbortController(controller);
+      
+      // Handle streaming chunks
+      await getChatCompletionStream(
+        conversationHistory,
+        selectedModel,
+        (chunk) => {
+          // Update the message content as chunks arrive
+          const contentDelta = chunk.choices[0].delta.content || '';
+          
+          // Only add content if there's something to add
+          if (contentDelta) {
+            accumulatedContent += contentDelta;
             
-            // Only add content if there's something to add
-            if (contentDelta) {
-              accumulatedContent += contentDelta;
-              
-              // Update UI
-              setMessages((prevMessages) => {
-                const newMessages = [...prevMessages];
-                // We're specifically updating the message at index + 1
-                if (index + 1 < newMessages.length && newMessages[index + 1].role === 'assistant') {
-                  newMessages[index + 1] = {
-                    ...newMessages[index + 1],
-                    content: accumulatedContent,
-                    model: chunk.model,
-                    messageid: messageId || undefined // Keep the message ID
-                  };
-                }
-                
-                return newMessages;
-              });
-              
-              // Periodically update the message in the database if we have a messageId
-              if (messageId && accumulatedContent.length % 100 === 0) {
-                updateStreamingMessage(messageId, accumulatedContent).catch(console.error);
-              }
-            }
-          },
-          () => {
-            // When streaming is complete, save the final message to the database
-            if (messageId && accumulatedContent) {
-              updateStreamingMessage(messageId, accumulatedContent).catch(console.error);
-            }
-            setIsLoading(false);
-            setStreamingMessageId(null);
-            setAbortController(null);
-          },
-          (error) => {
-            console.error('Error during streaming retry:', error);
-            
-            // Check if this was an abort error (user canceled the request)
-            const wasAborted = error.name === 'AbortError' || error.message === 'Request aborted';
-            
-            // Handle error in UI
+            // Update UI
             setMessages((prevMessages) => {
               const newMessages = [...prevMessages];
-              
-              // Update the specific assistant message with an error
+              // We're specifically updating the message at index + 1
               if (index + 1 < newMessages.length && newMessages[index + 1].role === 'assistant') {
-                if (accumulatedContent) {
-                  // Keep what we have so far and add error message if not aborted
-                  newMessages[index + 1].content = accumulatedContent + 
-                    (wasAborted ? '\n\n_Generation stopped._' : '\n\n_Error: Message streaming was interrupted._');
-                } else {
-                  // Replace loading message with error or abort message
-                  newMessages[index + 1].content = wasAborted 
-                    ? 'Generation stopped.'
-                    : 'Sorry, there was an error processing your request.';
-                }
+                newMessages[index + 1] = {
+                  ...newMessages[index + 1],
+                  content: accumulatedContent,
+                  model: chunk.model,
+                  messageid: messageId || undefined // Keep the message ID
+                };
               }
               
               return newMessages;
             });
             
-            // Save error state to database if we have a messageId
-            if (messageId) {
-              const errorMessage = accumulatedContent 
-                ? accumulatedContent + (wasAborted 
-                    ? '\n\n_Generation stopped._' 
-                    : '\n\n_Error: Message streaming was interrupted._')
-                : wasAborted 
-                  ? 'Generation stopped.'
-                  : 'Sorry, there was an error processing your request.';
-                  
-              updateStreamingMessage(messageId, errorMessage).catch(console.error);
+            // Periodically update the message in the database if we have a messageId
+            if (messageId && accumulatedContent.length % 100 === 0) {
+              updateStreamingMessage(messageId, accumulatedContent).catch(console.error);
             }
-            
-            setIsLoading(false);
-            setStreamingMessageId(null);
-            setAbortController(null);
-          },
-          controller.signal
-        );
-      } else {
-        // Non-streaming approach
-        const controller = new AbortController();
-        setAbortController(controller);
-        
-        // Get AI response using the selected model
-        const response = await getChatCompletion(conversationHistory, selectedModel, controller.signal);
-        
-        if (response.choices && response.choices.length > 0) {
-          const newAssistantMessage = response.choices[0].message;
+          }
+        },
+        () => {
+          // When streaming is complete, save the final message to the database
+          if (messageId && accumulatedContent) {
+            updateStreamingMessage(messageId, accumulatedContent).catch(console.error);
+          }
+          setIsLoading(false);
+          setStreamingMessageId(null);
+          setAbortController(null);
+        },
+        (error) => {
+          console.error('Error during streaming retry:', error);
           
-          // Update the message in the UI
+          // Check if this was an abort error (user canceled the request)
+          const wasAborted = error.name === 'AbortError' || error.message === 'Request aborted';
+          
+          // Handle error in UI
           setMessages((prevMessages) => {
             const newMessages = [...prevMessages];
+            
+            // Update the specific assistant message with an error
             if (index + 1 < newMessages.length && newMessages[index + 1].role === 'assistant') {
-              newMessages[index + 1] = {
-                ...newMessages[index + 1],
-                content: newAssistantMessage.content,
-                model: response.model,
-              };
+              if (accumulatedContent) {
+                // Keep what we have so far and add error message if not aborted
+                newMessages[index + 1].content = accumulatedContent + 
+                  (wasAborted ? '\n\n_Generation stopped._' : '\n\n_Error: Message streaming was interrupted._');
+              } else {
+                // Replace loading message with error or abort message
+                newMessages[index + 1].content = wasAborted 
+                  ? 'Generation stopped.'
+                  : 'Sorry, there was an error processing your request.';
+              }
             }
+            
             return newMessages;
           });
           
-          // Update the message in the database
+          // Save error state to database if we have a messageId
           if (messageId) {
-            await updateStreamingMessage(messageId, newAssistantMessage.content);
-          } else {
-            // If for some reason we don't have a message ID, create a new one
-            await saveMessage(activeChatId, newAssistantMessage.content, response.model);
+            const errorMessage = accumulatedContent 
+              ? accumulatedContent + (wasAborted 
+                  ? '\n\n_Generation stopped._' 
+                  : '\n\n_Error: Message streaming was interrupted._')
+              : wasAborted 
+                ? 'Generation stopped.'
+                : 'Sorry, there was an error processing your request.';
+                
+            updateStreamingMessage(messageId, errorMessage).catch(console.error);
           }
-        }
-      }
+          
+          setIsLoading(false);
+          setStreamingMessageId(null);
+          setAbortController(null);
+        },
+        controller.signal
+      );
     } catch (error) {
       console.error('Error retrying message:', error);
       
@@ -836,6 +720,10 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
   // Handle suggestion click
   const handleSuggestionClick = (suggestion: string) => {
     handleSubmit(null, suggestion);
+    // Add this to scroll to bottom after clicking a suggestion
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    }, 300); // Slightly longer timeout to account for message generation
   };
 
   // Handle Enter key for submission (Shift+Enter for new line)
@@ -850,6 +738,11 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
     setMessages([]);
     setActiveChatId(null);
     setIsMobileSidebarOpen(false);
+    
+    // Add a small delay to ensure DOM updates before scrolling
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    }, 100);
   };
 
   const handleSelectChat = (chatId: string) => {
@@ -914,23 +807,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
         <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent" ref={chatContainerRef}>
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center px-4">
-              <h1 className="text-2xl md:text-3xl font-semibold mb-8 text-center">How can I help you?</h1>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl w-full mb-8">
-                <button className="suggestion-button flex items-center justify-center gap-2">
-                  <span className="text-purple-400">✨</span>Create
-                </button>
-                <button className="suggestion-button flex items-center justify-center gap-2">
-                  <span className="text-blue-400">📚</span>Explore
-                </button>
-                <button className="suggestion-button flex items-center justify-center gap-2">
-                  <span className="text-green-400">🧩</span>Code
-                </button>
-                <button className="suggestion-button flex items-center justify-center gap-2">
-                  <span className="text-amber-400">🎓</span>Learn
-                </button>
-              </div>
-              
+              <h1 className="text-2xl md:text-3xl font-semibold mb-8 text-center">How can I help you?</h1>              
               <div className="space-y-3 max-w-2xl w-full px-2">
                 {SUGGESTIONS.map((suggestion, index) => (
                   <button 
@@ -1115,7 +992,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder="Type your message here..."
-                  className="flex-1 bg-transparent resize-none max-h-36 py-2 px-3 focus:outline-none text-gray-100 min-h-[44px]"
+                  className="flex-1 bg-transparent resize-none max-h-36 py-2 px-3 focus:outline-none dark:text-gray-100 text-gray-800 min-h-[44px]"
                   rows={1}
                   disabled={isLoading}
                 />
@@ -1128,7 +1005,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                       aria-label="Stop generation"
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clipRule="evenodd" />
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clipRule="evenodd" />
                       </svg>
                     </button>
                   )}
@@ -1156,22 +1033,6 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
             <div className="flex mt-2 justify-between items-center text-xs text-zinc-500">
               <div className="hidden sm:block">Press Enter to send</div>
               <div className="flex items-center gap-3">
-                <div className="flex items-center">
-                  <label htmlFor="streamToggle" className="mr-2 cursor-pointer">
-                    {enableStreaming ? 'Streaming: On' : 'Streaming: Off'} 
-                  </label>
-                  <div className="relative inline-block w-10 align-middle select-none">
-                    <input
-                      id="streamToggle"
-                      type="checkbox"
-                      checked={enableStreaming}
-                      onChange={() => setEnableStreaming(!enableStreaming)}
-                      className="sr-only"
-                    />
-                    <div className={`block w-10 h-6 rounded-full ${enableStreaming ? 'bg-purple-600' : 'bg-zinc-700'} transition-colors duration-200`}></div>
-                    <div className={`absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform duration-200 ease-in-out ${enableStreaming ? 'transform translate-x-4' : ''}`}></div>
-                  </div>
-                </div>
                 <div className="relative flex justify-end" ref={dropdownRef}>
                   <button 
                     onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
@@ -1226,7 +1087,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                     </div>
                   )}
                 </div>
-                <div className="relative flex justify-end">
+                <div className="md:hidden relative flex justify-end">
                   <label htmlFor="fileUpload" className="cursor-pointer hover:text-white transition-colors">
                     Import Conversation
                   </label>

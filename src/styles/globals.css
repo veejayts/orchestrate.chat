@@ -3,9 +3,33 @@
 @tailwind utilities;
 
 :root {
+  --foreground-rgb: 12, 12, 12;
+  --background-rgb: 255, 255, 255;
+  --sidebar-bg: 248, 248, 252;
+  --message-user-bg: 238, 233, 244;
+  --message-user-border: 179, 145, 209;
+  --message-assistant-bg: 240, 240, 245;
+  --message-assistant-border: 224, 224, 230;
+  --input-container-bg: 240, 240, 245;
+  --input-container-border: 215, 215, 225;
+  --suggestion-bg: 240, 240, 245;
+  --suggestion-border: 224, 224, 230;
+  --suggestion-text: 75, 75, 85;
+}
+
+.dark {
   --foreground-rgb: 255, 255, 255;
   --background-rgb: 12, 12, 12;
   --sidebar-bg: 24, 16, 32;
+  --message-user-bg: 76, 29, 149, 0.3;
+  --message-user-border: 91, 33, 182, 0.3;
+  --message-assistant-bg: 39, 39, 42, 0.7;
+  --message-assistant-border: 39, 39, 42;
+  --input-container-bg: 39, 39, 42, 0.5;
+  --input-container-border: 63, 63, 70;
+  --suggestion-bg: 39, 39, 42, 0.5;
+  --suggestion-border: 39, 39, 42;
+  --suggestion-text: 212, 212, 216;
 }
 
 body {
@@ -22,11 +46,15 @@ body {
 }
 
 .chat-message-user {
-  @apply relative bg-purple-800/30 rounded-2xl rounded-tr-sm py-3 px-4 self-end max-w-[90%] sm:max-w-[75%] border border-purple-900/30;
+  @apply relative rounded-2xl rounded-tr-sm py-3 px-4 self-end max-w-[90%] sm:max-w-[75%] border;
+  background-color: rgba(var(--message-user-bg));
+  border-color: rgba(var(--message-user-border));
 }
 
 .chat-message-assistant {
-  @apply relative bg-zinc-800/70 rounded-2xl rounded-tl-sm py-3 px-4 self-start max-w-[90%] sm:max-w-[75%] border border-zinc-800;
+  @apply relative rounded-2xl rounded-tl-sm py-3 px-4 self-start max-w-[90%] sm:max-w-[75%] border;
+  background-color: rgba(var(--message-assistant-bg));
+  border-color: rgba(var(--message-assistant-border));
 }
 
 .message-content {
@@ -46,11 +74,13 @@ body {
 }
 
 .message-content pre {
-  @apply bg-zinc-900 rounded-md p-3 overflow-x-auto my-3;
+  @apply rounded-md p-3 overflow-x-auto my-3;
+  background-color: rgba(var(--message-assistant-bg));
 }
 
 .message-content code {
-  @apply font-mono bg-zinc-900 px-1 py-0.5 rounded text-sm;
+  @apply font-mono px-1 py-0.5 rounded text-sm;
+  background-color: rgba(var(--message-assistant-bg));
 }
 
 .message-content pre code {
@@ -87,7 +117,15 @@ body {
 }
 
 .suggestion-button {
-  @apply rounded-xl bg-zinc-800/50 border border-zinc-800 p-3 text-sm text-zinc-300 hover:border-zinc-700 hover:bg-zinc-800 transition-colors;
+  @apply rounded-xl p-3 text-sm transition-colors;
+  background-color: rgba(var(--suggestion-bg));
+  border: 1px solid rgb(var(--suggestion-border));
+  color: rgb(var(--suggestion-text));
+}
+
+.suggestion-button:hover {
+  border-color: rgba(var(--suggestion-border), 0.7);
+  background-color: rgba(var(--suggestion-bg), 0.8);
 }
 
 .new-chat-button {
@@ -104,7 +142,13 @@ body {
 }
 
 .chat-input-container {
-  @apply relative w-full rounded-xl border border-zinc-700 bg-zinc-800/50 backdrop-blur-sm transition-colors focus-within:border-zinc-600;
+  @apply relative w-full rounded-xl backdrop-blur-sm transition-colors;
+  background-color: rgba(var(--input-container-bg));
+  border: 1px solid rgb(var(--input-container-border));
+}
+
+.chat-input-container:focus-within {
+  border-color: rgb(107, 70, 193);
 }
 
 /* Animation for fade in */
@@ -207,6 +251,29 @@ body {
 
 .delete-message-btn:hover {
   opacity: 1 !important;
+}
+
+/* Theme toggle */
+.theme-toggle {
+  @apply relative inline-block w-12 h-6 rounded-full cursor-pointer transition-colors duration-200;
+  background-color: rgba(var(--input-container-bg));
+  border: 1px solid rgb(var(--input-container-border));
+}
+
+.theme-toggle span {
+  @apply absolute block w-5 h-5 rounded-full shadow transition-transform duration-200;
+  top: 2px;
+  left: 2px;
+  background-color: #fff;
+}
+
+.theme-toggle.dark span {
+  transform: translateX(6px);
+}
+
+.dark .theme-toggle span {
+  transform: translateX(24px);
+  background-color: rgb(24, 24, 27);
 }
 
 /* Media queries for responsive design */

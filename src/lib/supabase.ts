@@ -42,6 +42,7 @@ export interface Chat {
   title: string;
   created_at: string;
   user_id?: string;
+  latest_chat_timestamp?: string;
 }
 
 export interface ChatMessageDB {
@@ -252,13 +253,14 @@ export async function getChatMessages(chatId: string): Promise<ChatMessageDB[]> 
 }
 
 // Get all chats for the current user
-export async function getUserChats(): Promise<Chat[]> {
+export async function getUserChats(limit: number = 30, offset: number = 0): Promise<Chat[]> {
   try {
     // RLS policies will automatically filter to only show the current user's chats
     const { data, error } = await supabase
       .from('chats_meta')
       .select('*')
-      .order('created_at', { ascending: false });
+      .order('latest_chat_timestamp', { ascending: false })
+      .range(offset, offset + limit - 1);
     
     if (error) throw error;
     
@@ -266,22 +268,13 @@ export async function getUserChats(): Promise<Chat[]> {
       chatId: chat.chatid,
       title: chat.title,
       created_at: chat.created_at,
-      user_id: chat.user_id
+      user_id: chat.user_id,
+      latest_chat_timestamp: chat.latest_chat_timestamp
     })) || [];
   } catch (error) {
     console.error('Error getting user chats:', error);
     return [];
   }
-}
-
-// Convert database messages to the format expected by OpenRouter
-export function dbMessagesToChatMessages(messages: ChatMessageDB[]): ChatMessage[] {
-  return messages.map(msg => ({
-    role: msg.source === 'user' ? 'user' : 'assistant' as 'user' | 'assistant',
-    content: msg.message,
-    model: msg.source !== 'user' ? msg.source : undefined,
-    messageid: msg.messageid
-  }));
 }
 
 // Update the chat title
@@ -351,5 +344,32 @@ export async function deleteMessage(messageId: string): Promise<boolean> {
   } catch (error) {
     console.error('Error deleting message:', error);
     return false;
+  }
+}
+
+// Get user's OpenRouter API key
+export async function getUserOpenRouterApiKey(): Promise<string | null> {
+  try {
+    const userId = await getCurrentUserId();
+    if (!userId) {
+      console.error('User not authenticated');
+      return null;
+    }
+
+    const { data, error } = await supabase
+      .from('user')
+      .select('openrouter_api_key')
+      .eq('user_id', userId)
+      .single();
+    
+    if (error) {
+      console.error('Error fetching user API key:', error);
+      return null;
+    }
+    
+    return data?.openrouter_api_key || null;
+  } catch (error) {
+    console.error('Error getting user API key:', error);
+    return null;
   }
 }
