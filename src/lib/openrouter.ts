@@ -116,7 +116,6 @@ export async function getChatCompletionStream(
   onError: (error: Error) => void,
   signal?: AbortSignal,
   useWebSearch: boolean = false,
-  webSearchMaxResults: number = 10
 ): Promise<void> {
   // Get the user's API key from the cache or database
   const apiKey = await getApiKey();
@@ -138,8 +137,8 @@ export async function getChatCompletionStream(
     requestBody.plugins = [
       {
         "id": "web",
-        "max_results": webSearchMaxResults,
-        "search_context_size": "high"
+        "max_results": process.env.NEXT_PUBLIC_WEB_SEARCH_MAX_RESULTS || 5,
+        "search_context_size": process.env.NEXT_PUBLIC_WEB_SEARCH_CONTEXT_SIZE || 5,
       }
     ];
   }
