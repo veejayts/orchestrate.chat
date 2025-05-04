@@ -1100,7 +1100,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ userId, user, onSignOut }
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder="Type your message here..."
-                  className="flex-1 bg-transparent resize-none max-h-36 py-2 px-3 focus:outline-none text-gray-100 min-h-[44px]"
+                  className="flex-1 bg-transparent resize-none max-h-36 py-2 px-3 focus:outline-none dark:text-gray-100 text-gray-800 min-h-[44px]"
                   rows={1}
                   disabled={isLoading}
                 />

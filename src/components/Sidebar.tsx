@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import ProfilePopup from './ProfilePopup';
 import ThemeToggle from './ThemeToggle';
 import { Chat, getUserChats } from '@/lib/supabase';
+import { useTheme } from './ThemeContext';
 
 interface SidebarProps {
   onNewChat: () => void;
@@ -30,6 +31,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   onMobileClose,
   loadChats
 }) => {
+  const { theme } = useTheme(); // Get current theme
   const [chats, setChats] = useState<Chat[]>(initialChats);
   const [offset, setOffset] = useState<number>(0);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -183,6 +185,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   const renderChatItem = (chat: Chat) => {
     const isEditing = chat.chatId === editingChatId;
+    const isActive = activeChatId === chat.chatId;
     
     if (isEditing) {
       return (
@@ -200,9 +203,13 @@ const Sidebar: React.FC<SidebarProps> = ({
 
     return (
       <div 
-        className={`group flex items-center justify-between px-2 py-2 text-sm rounded-lg hover:bg-zinc-800/50 ${
-          activeChatId === chat.chatId ? 'bg-zinc-800' : ''
-        }`}
+        className={`group flex items-center justify-between px-2 py-2 text-sm rounded-lg hover:bg-zinc-800/50 dark:hover:bg-zinc-800/50 
+          ${isActive 
+            ? theme === 'dark'
+              ? 'bg-zinc-800 text-white' 
+              : 'bg-purple-100 text-purple-900'
+            : ''
+          }`}
       >
         <div 
           className="flex-1 overflow-hidden text-ellipsis cursor-pointer"
